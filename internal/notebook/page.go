@@ -52,7 +52,7 @@ func CreatePage(c *gin.Context) {
 	newPage := models.Page{
 		NotebookID: parsedNotebookID,
 		Title:      input.Title,
-		Content:    input.Content,
+		Content:    string(input.Content),
 		Order:      input.Order,
 	}
 
