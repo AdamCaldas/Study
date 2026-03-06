@@ -7,6 +7,7 @@ import (
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
+	"studfy-backend/internal/models"
 	"studfy-backend/internal/notebook"
 	"studfy-backend/internal/space"
 	"studfy-backend/internal/study"
@@ -56,12 +57,21 @@ func main() {
 	protected.Use(auth.AuthMiddleware())
 	{
 		protected.GET("/me", func(c *gin.Context) {
-			userID, _ := c.Get("userID")
+			userID, exists := c.Get("userID")
+			if !exists {
+				c.JSON(401, gin.H{"error": "Usuário não identificado"})
+				return
+			}
 
-			c.JSON(200, gin.H{
-				"message": "Acesso Autorizado! Você está logado.",
-				"seu_id":  userID,
-			})
+			// 2. Busca os dados completos no banco de dados
+			var user models.User
+			if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+				c.JSON(404, gin.H{"error": "Usuário não encontrado no banco"})
+				return
+			}
+
+			// 3. Devolve o objeto usuário completo para o Front-end
+			c.JSON(200, user)
 		})
 
 		// Rota de Gamificação
