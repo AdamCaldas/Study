@@ -20,8 +20,10 @@ func ConnectDB() {
 		log.Fatal("Erro: DATABASE_URL não encontrada no arquivo .env")
 	}
 
+	// Juntamos o Secret (PrepareStmt) com o Logger em um único comando
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		PrepareStmt: false,                               // ESSENCIAL para o Pooler do Supabase (Porta 6543)
+		Logger:      logger.Default.LogMode(logger.Info), // Mantém logs detalhados no terminal
 	})
 
 	if err != nil {
@@ -33,14 +35,15 @@ func ConnectDB() {
 		log.Fatal("Falha ao pegar a instância genérica do banco: ", err)
 	}
 
+	// Configurações de performance da fila de conexões
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
 	DB = db
-	log.Println("✅ Conexão com PostgreSQL estabelecida com sucesso!")
+	log.Println("✅ Conexão com PostgreSQL (Pooler) estabelecida com sucesso!")
 
-	// --- A MÁGICA ACONTECE AQUI ---
+	// --- MIGRATIONS ---
 	log.Println("Rodando as Migrations do banco de dados...")
 	err = db.AutoMigrate(
 		&models.User{},
@@ -56,5 +59,5 @@ func ConnectDB() {
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
 	}
-	log.Println("✅ Tabelas criadas/atualizadas com sucesso!")
+	log.Println("✅ Tabelas sincronizadas com sucesso!")
 }
