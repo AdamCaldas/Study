@@ -72,7 +72,7 @@ type Page struct {
 	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	NotebookID uuid.UUID `gorm:"type:uuid;index" json:"notebook_id"`
 	Title      string    `gorm:"size:255;not null" json:"title"`
-	Content    []byte    `gorm:"type:jsonb" json:"content"`
+	Content    string    `gorm:"type:jsonb" json:"content"`
 	Order      int       `json:"order"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
