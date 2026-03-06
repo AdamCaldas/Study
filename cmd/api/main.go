@@ -12,6 +12,7 @@ import (
 	"studfy-backend/internal/study"
 	"studfy-backend/pkg/database"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -26,9 +27,19 @@ func main() {
 
 	router := gin.Default()
 
+	// Configuração do CORS (O Porteiro da API) - Corrigido para "router.Use"
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true, // Para o MVP, aceita requisições de qualquer lugar (localhost, vercel, etc)
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
+
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong! Servidor StudFy conectado ao banco 🚀"})
 	})
+
 	router.POST("/v1/register", auth.Register)
 	router.POST("/v1/login", auth.Login)
 
@@ -44,10 +55,10 @@ func main() {
 			})
 		})
 
-		// Rota de Gamificação (Agora no lugar certo!)
+		// Rota de Gamificação
 		protected.POST("/gamification/reward", gamification.RewardXP)
 
-		// Rotas de Foco e Produtividade (NOVAS!)
+		// Rotas de Foco e Produtividade
 		protected.POST("/focus/pomodoro", focus.RegisterPomodoro)
 		protected.POST("/focus/mood", focus.RegisterMood)
 
@@ -56,17 +67,16 @@ func main() {
 		protected.GET("/spaces", space.ListSpaces)
 
 		// --- NOVO GRUPO: CONTROLE DE ACESSO PARA AMIGOS ---
-		// Injetamos o CheckSpaceAccess. Tudo aqui dentro está protegido pela validação de dono/convidado!
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
-
 			spaceRoutes.POST("/share", space.ShareSpace)
 
 			// Notas Rápidas
 			spaceRoutes.POST("/notes", space.CreateQuickNote)
 			spaceRoutes.GET("/notes", space.ListQuickNotes)
 
+			// Revisões
 			spaceRoutes.POST("/reviews", study.CreateReview)
 
 			// Planos de Estudo
@@ -84,7 +94,6 @@ func main() {
 		}
 
 		// --- ROTAS DE PÁGINAS ---
-		// Ficam fora do spaceRoutes porque a URL base delas é /notebooks/...
 		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
 		protected.GET("/notebooks/:notebook_id/pages", notebook.ListPages)
 	}
