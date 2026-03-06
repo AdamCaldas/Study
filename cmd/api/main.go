@@ -63,14 +63,14 @@ func main() {
 				return
 			}
 
-			// 2. Busca os dados completos no banco de dados
+			// Busca os dados completos no banco de dados
 			var user models.User
 			if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
 				c.JSON(404, gin.H{"error": "Usuário não encontrado no banco"})
 				return
 			}
 
-			// 3. Devolve o objeto usuário completo para o Front-end
+			// Devolve o objeto usuário completo para o Front-end
 			c.JSON(200, user)
 		})
 
@@ -85,10 +85,18 @@ func main() {
 		protected.POST("/spaces", auth.CheckSpaceLimit(), space.CreateSpace)
 		protected.GET("/spaces", space.ListSpaces)
 
-		// --- NOVO GRUPO: CONTROLE DE ACESSO PARA AMIGOS ---
+		// --- NOVAS ROTAS DO FRONT-END (Código e Entrar) ---
+		protected.GET("/spaces/code/:code", space.GetSpaceByCode)
+		protected.POST("/spaces/join", space.JoinSpaceByCode)
+
+		// --- NOVO GRUPO: CONTROLE DE ACESSO PARA AMIGOS E EDIÇÃO ---
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
+			// MUDAMOS PARA PUT PARA BATER COM O FRONT-END! 🚀
+			spaceRoutes.PUT("", space.UpdateSpace)    // Rota para EDITAR o Space atual
+			spaceRoutes.DELETE("", space.DeleteSpace) // Rota para APAGAR o Space atual
+
 			spaceRoutes.POST("/share", space.ShareSpace)
 
 			// Notas Rápidas

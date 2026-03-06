@@ -93,3 +93,116 @@ func ListSpaces(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"spaces": spaces})
 }
+
+// --- ESTRUTURA PARA EDITAR SPACE ---
+type UpdateSpaceInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ColorHex    string `json:"color_hex"`
+	Category    string `json:"category"`
+	Visibility  string `json:"visibility"`
+}
+
+// UpdateSpace - Atualiza os dados de um Space existente
+func UpdateSpace(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	var input UpdateSpaceInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos para atualização"})
+		return
+	}
+
+	// O GORM usa o .Updates para alterar apenas as colunas que vieram no JSON
+	if err := database.DB.Model(&models.Space{}).Where("id = ?", spaceID).Updates(input).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar o Space no banco de dados"})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Space atualizado com sucesso!"})
+}
+
+// DeleteSpace - Apaga um Space do banco de dados
+func DeleteSpace(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	// O GORM faz um "Soft Delete" automático se você configurou o gorm.Model na struct
+	if err := database.DB.Delete(&models.Space{}, "id = ?", spaceID).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar o Space"})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Space deletado com sucesso!"})
+}
+
+// GetSpaceByCode - Busca um space público/compartilhado pelo código (SPACE-123)
+func GetSpaceByCode(c *gin.Context) {
+	code := c.Param("code")
+
+	var space models.Space
+	if err := database.DB.Where("share_code = ?", code).First(&space).Error; err != nil {
+		c.JSON(404, gin.H{"error": "Space não encontrado ou código inválido"})
+		return
+	}
+
+	c.JSON(200, space)
+}
+
+// JoinSpaceByCode - Permite que o usuário logado entre em um Space usando o código
+func JoinSpaceByCode(c *gin.Context) {
+	userIDContext, _ := c.Get("userID")
+
+	// Converte o ID do contexto (texto) para o formato uuid.UUID do banco
+	userID, err := uuid.Parse(userIDContext.(string))
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
+		return
+	}
+
+	var input struct {
+		Code string `json:"code" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "O código do Space é obrigatório"})
+		return
+	}
+
+	// 1. Acha o Space pelo código
+	var space models.Space
+	if err := database.DB.Where("share_code = ?", input.Code).First(&space).Error; err != nil {
+		c.JSON(404, gin.H{"error": "Space inválido ou não encontrado"})
+		return
+	}
+
+	// 2. Verifica se o usuário já é o dono do Space
+	if space.OwnerID == userID {
+		c.JSON(400, gin.H{"error": "Você já é o dono deste Space!"})
+		return
+	}
+
+	// 3. Verifica se o usuário já é um convidado (membro)
+	var perm models.SpacePermission
+	err = database.DB.Where("space_id = ? AND user_id = ?", space.ID, userID).First(&perm).Error
+	if err == nil {
+		c.JSON(400, gin.H{"error": "Você já é membro deste Space!"})
+		return
+	}
+
+	// 4. Cria a permissão de membro (Convidado/Viewer)
+	newPerm := models.SpacePermission{
+		SpaceID:     space.ID,
+		UserID:      userID,   // Agora sim, os dois são uuid.UUID!
+		AccessLevel: "VIEWER", // Nível padrão para quem entra por link
+	}
+
+	if err := database.DB.Create(&newPerm).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao tentar entrar no Space"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"message": "Você entrou no Space com sucesso!",
+		"space":   space,
+	})
+}
