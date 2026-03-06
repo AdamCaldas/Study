@@ -1,0 +1,12 @@
+# Arquivos de ambiente e segredos
+.env
+
+# Binários gerados pelo Go
+/bin/
+*.exe
+api-server
+
+# Pastas de sistema/IDE
+.vscode/
+.idea/
+*.DS_Store
