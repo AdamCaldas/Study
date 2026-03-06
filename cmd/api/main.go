@@ -27,11 +27,23 @@ func main() {
 
 	router := gin.Default()
 
-	// Configuração do CORS (O Porteiro da API) - Corrigido para "router.Use"
+	// Configuração do CORS - Versão "Blindada" para o Front-end
 	router.Use(cors.New(cors.Config{
-		AllowAllOrigins:  true, // Para o MVP, aceita requisições de qualquer lugar (localhost, vercel, etc)
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		// Aqui permitimos o localhost dele e qualquer outra origem no MVP
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		// Esta lista aqui é o que estava faltando! Adicionamos o que o seu dev pediu:
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Content-Length",
+			"Accept-Encoding",
+			"X-CSRF-Token",
+			"Authorization",
+			"Accept",
+			"Cache-Control",
+			"X-Requested-With",
+		},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
