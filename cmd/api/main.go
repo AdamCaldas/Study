@@ -27,12 +27,9 @@ func main() {
 
 	router := gin.Default()
 
-	// Configuração do CORS - Versão "Blindada" para o Front-end
 	router.Use(cors.New(cors.Config{
-		// Aqui permitimos o localhost dele e qualquer outra origem no MVP
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		// Esta lista aqui é o que estava faltando! Adicionamos o que o seu dev pediu:
 		AllowHeaders: []string{
 			"Origin",
 			"Content-Type",
