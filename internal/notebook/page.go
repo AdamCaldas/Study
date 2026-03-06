@@ -57,7 +57,10 @@ func CreatePage(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&newPage).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Página"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Erro ao criar Página",
+			"detalhe": err.Error(), // 👈 A MÁGICA TÁ AQUI! Isso vai mostrar o erro real no F12!
+		})
 		return
 	}
 
