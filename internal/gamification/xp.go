@@ -1,57 +1,51 @@
 package gamification
 
 import (
-	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// O que o Frontend vai enviar
-type RewardXPInput struct {
-	Action string `json:"action" binding:"required"` // Ex: "pomodoro", "page_created", "cycle_completed"
+type RewardInput struct {
+	Action string `json:"action" binding:"required"`
 }
 
-// RewardXP recebe a ação e injeta os pontos no perfil do usuário
 func RewardXP(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userIDContext, _ := c.Get("userID")
+	userID, err := uuid.Parse(userIDContext.(string))
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
+		return
+	}
 
-	var input RewardXPInput
+	var input RewardInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Ação inválida"})
+		c.JSON(400, gin.H{"error": "Ação não informada"})
 		return
 	}
 
-	// 1. Tabela de Pontuação (Você pode balancear esses valores depois)
-	pointsToAward := 0
+	// 1. Define quantos pontos a ação vale
+	xpToAward := 0
 	switch input.Action {
-	case "pomodoro":
-		pointsToAward = 50 // Focar dá muito XP
-	case "cycle_completed":
-		pointsToAward = 100 // Fechar o ciclo é o "chefão"
-	case "page_created":
-		pointsToAward = 10 // Criar material dá um pouco de XP
+	case "completed_pomodoro":
+		xpToAward = 50 // Ganha 50 XP por Pomodoro
+	case "created_note":
+		xpToAward = 10 // Ganha 10 XP por anotação
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Ação de gamificação desconhecida"})
+		xpToAward = 5 // Qualquer outra ação ganha 5 XP
+	}
+
+	// 2. Adiciona o XP direto na conta do usuário no banco usando gorm.Expr
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpToAward)).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar XP", "detalhe": err.Error()})
 		return
 	}
 
-	// 2. Atualiza o banco de dados magicamente (Incremento Atômico)
-	// Isso evita bugs se o usuário mandar duas requisições ao mesmo tempo
-	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", pointsToAward)).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar XP"})
-		return
-	}
-
-	// 3. Busca o novo total para devolver pro Front (para ele fazer aquela animação da barra enchendo)
-	var updatedUser models.User
-	database.DB.Select("xp").First(&updatedUser, "id = ?", userID)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":  "XP ganho com sucesso!",
-		"gained":   pointsToAward,
-		"total_xp": updatedUser.XP,
+	c.JSON(200, gin.H{
+		"message":   "XP ganho com sucesso!",
+		"xp_earned": xpToAward,
 	})
 }
