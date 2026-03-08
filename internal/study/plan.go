@@ -78,3 +78,41 @@ func ListStudyPlans(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"plans": plans})
 }
+
+type UpdateStudyPlanInput struct {
+	DayOfWeek  int       `json:"day_of_week"`
+	StartTime  string    `json:"start_time"`
+	EndTime    string    `json:"end_time"`
+	Activity   string    `json:"activity"`
+	NotebookID uuid.UUID `json:"notebook_id"`
+}
+
+func UpdateStudyPlan(c *gin.Context) {
+	planID := c.Param("plan_id")
+	var input UpdateStudyPlanInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos"})
+		return
+	}
+
+	if err := database.DB.Model(&models.StudyPlan{}).Where("id = ?", planID).Updates(models.StudyPlan{
+		DayOfWeek:  input.DayOfWeek,
+		StartTime:  input.StartTime,
+		EndTime:    input.EndTime,
+		Activity:   input.Activity,
+		NotebookID: input.NotebookID,
+	}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar cronograma", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Cronograma atualizado!"})
+}
+
+func DeleteStudyPlan(c *gin.Context) {
+	planID := c.Param("plan_id")
+	if err := database.DB.Where("id = ?", planID).Delete(&models.StudyPlan{}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar atividade", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Atividade removida do cronograma!"})
+}

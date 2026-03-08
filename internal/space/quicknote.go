@@ -77,3 +77,37 @@ func ListQuickNotes(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"notes": notes})
 }
+
+type UpdateQuickNoteInput struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Color   string `json:"color"`
+}
+
+func UpdateQuickNote(c *gin.Context) {
+	noteID := c.Param("note_id")
+	var input UpdateQuickNoteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos"})
+		return
+	}
+
+	if err := database.DB.Model(&models.QuickNote{}).Where("id = ?", noteID).Updates(models.QuickNote{
+		Title:   input.Title,
+		Content: input.Content,
+		Color:   input.Color,
+	}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar nota", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Nota atualizada!"})
+}
+
+func DeleteQuickNote(c *gin.Context) {
+	noteID := c.Param("note_id")
+	if err := database.DB.Where("id = ?", noteID).Delete(&models.QuickNote{}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar nota", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Nota apagada!"})
+}

@@ -2,6 +2,7 @@ package notebook
 
 import (
 	"encoding/json"
+
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -105,4 +106,51 @@ func ListPages(c *gin.Context) {
 		},
 		"pages": pages,
 	})
+}
+
+// DeletePage - Apaga uma página
+func DeletePage(c *gin.Context) {
+	pageID := c.Param("page_id")
+	if err := database.DB.Where("id = ?", pageID).Delete(&models.Page{}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar página", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Página apagada com sucesso!"})
+}
+
+type UpdatePageInput struct {
+	Title   string                 `json:"title"`
+	Content map[string]interface{} `json:"content"` // Recebe o JSON flexível do front
+	Order   int                    `json:"order"`
+}
+
+// UpdatePage - Edita título ou conteúdo da página
+func UpdatePage(c *gin.Context) {
+	pageID := c.Param("page_id")
+	var input UpdatePageInput
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos"})
+		return
+	}
+
+	// Transforma o map de volta para string para salvar no JSONB do banco sem dar erro 22P02
+	contentBytes, _ := json.Marshal(input.Content)
+	contentStr := string(contentBytes)
+
+	// Se o front não mandou conteúdo, não atualizamos o Content para não apagar o que já tem
+	updates := map[string]interface{}{
+		"title": input.Title,
+		"order": input.Order,
+	}
+	if len(input.Content) > 0 {
+		updates["content"] = contentStr
+	}
+
+	if err := database.DB.Model(&models.Page{}).Where("id = ?", pageID).Updates(updates).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar página", "detalhe": err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Página atualizada com sucesso!"})
 }

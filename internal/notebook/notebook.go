@@ -78,3 +78,39 @@ func ListNotebooks(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
 }
+
+// DeleteNotebook - Apaga um caderno e tudo dentro dele
+func DeleteNotebook(c *gin.Context) {
+	notebookID := c.Param("notebook_id")
+	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Caderno apagado com sucesso!"})
+}
+
+type UpdateNotebookInput struct {
+	Name     string `json:"name"`
+	ColorHex string `json:"color_hex"`
+}
+
+// UpdateNotebook - Edita nome e cor do caderno
+func UpdateNotebook(c *gin.Context) {
+	notebookID := c.Param("notebook_id")
+	var input UpdateNotebookInput
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos"})
+		return
+	}
+
+	if err := database.DB.Model(&models.Notebook{}).Where("id = ?", notebookID).Updates(models.Notebook{
+		Name:     input.Name,
+		ColorHex: input.ColorHex,
+	}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar caderno", "detalhe": err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "Caderno atualizado!"})
+}

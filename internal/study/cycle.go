@@ -143,3 +143,13 @@ func AdvanceCycleStep(c *gin.Context) {
 		"current_step": cycle.CurrentStep,
 	})
 }
+
+func DeleteStudyCycle(c *gin.Context) {
+	cycleID := c.Param("cycle_id")
+	// Como colocamos "Cascade Delete" no banco, ao apagar o ciclo, as matérias dele somem juntas automaticamente!
+	if err := database.DB.Where("id = ?", cycleID).Delete(&models.StudyCycle{}).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao apagar ciclo", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"message": "Ciclo apagado com sucesso!"})
+}

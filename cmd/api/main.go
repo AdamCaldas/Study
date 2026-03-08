@@ -85,44 +85,52 @@ func main() {
 		protected.POST("/spaces", auth.CheckSpaceLimit(), space.CreateSpace)
 		protected.GET("/spaces", space.ListSpaces)
 
-		// --- NOVAS ROTAS DO FRONT-END (Código e Entrar) ---
+		// --- ROTAS DO FRONT-END (Código e Entrar) ---
 		protected.GET("/spaces/code/:code", space.GetSpaceByCode)
 		protected.POST("/spaces/join", space.JoinSpaceByCode)
 
-		// --- NOVO GRUPO: CONTROLE DE ACESSO PARA AMIGOS E EDIÇÃO ---
+		// --- GRUPO: CONTROLE DE ACESSO PARA AMIGOS E EDIÇÃO ---
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
-			// MUDAMOS PARA PUT PARA BATER COM O FRONT-END! 🚀
-			spaceRoutes.PUT("", space.UpdateSpace)    // Rota para EDITAR o Space atual
-			spaceRoutes.DELETE("", space.DeleteSpace) // Rota para APAGAR o Space atual
-
+			// Edição do Space Próprio
+			spaceRoutes.PUT("", space.UpdateSpace)
+			spaceRoutes.DELETE("", space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
 
-			// Notas Rápidas
+			// Cadernos (CRUD Completo)
+			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
+			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
+			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
+			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
+
+			// Notas Rápidas / Post-its (CRUD Completo)
 			spaceRoutes.POST("/notes", space.CreateQuickNote)
 			spaceRoutes.GET("/notes", space.ListQuickNotes)
+			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
+			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
 			// Revisões
 			spaceRoutes.POST("/reviews", study.CreateReview)
 
-			// Planos de Estudo
+			// Planos de Estudo (CRUD Completo)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
 			spaceRoutes.GET("/plans", study.ListStudyPlans)
+			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
+			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
-			// Ciclos de Estudo
+			// Ciclos de Estudo (CRUD Completo)
 			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
 			spaceRoutes.GET("/cycles", study.ListStudyCycles)
 			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
-
-			// Cadernos
-			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
-			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
+			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
 		}
 
-		// --- ROTAS DE PÁGINAS ---
+		// --- ROTAS DE PÁGINAS (CRUD Completo) ---
 		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
 		protected.GET("/notebooks/:notebook_id/pages", notebook.ListPages)
+		protected.PUT("/pages/:page_id", notebook.UpdatePage)
+		protected.DELETE("/pages/:page_id", notebook.DeletePage)
 	}
 
 	port := os.Getenv("PORT")
