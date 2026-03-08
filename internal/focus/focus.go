@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"fmt"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// --- Estruturas de Entrada ---
 type PomodoroInput struct {
 	Duration int `json:"duration_minutes" binding:"required"`
 }
@@ -17,10 +17,12 @@ type MoodInput struct {
 	Mood string `json:"mood" binding:"required"`
 }
 
-// RegisterPomodoro - Salva uma sessão de foco
 func RegisterPomodoro(c *gin.Context) {
 	userIDContext, _ := c.Get("userID")
-	userID, err := uuid.Parse(userIDContext.(string))
+
+	// TRUQUE ANTI-PANIC: Transforma em string de forma segura antes de converter
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
 		return
@@ -45,10 +47,12 @@ func RegisterPomodoro(c *gin.Context) {
 	c.JSON(201, gin.H{"message": "Pomodoro salvo com sucesso!", "session": session})
 }
 
-// RegisterMood - Salva o humor do usuário
 func RegisterMood(c *gin.Context) {
 	userIDContext, _ := c.Get("userID")
-	userID, err := uuid.Parse(userIDContext.(string))
+
+	// TRUQUE ANTI-PANIC AQUI TAMBÉM
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
 		return

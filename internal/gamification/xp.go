@@ -1,6 +1,7 @@
 package gamification
 
 import (
+	"fmt"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -15,7 +16,10 @@ type RewardInput struct {
 
 func RewardXP(c *gin.Context) {
 	userIDContext, _ := c.Get("userID")
-	userID, err := uuid.Parse(userIDContext.(string))
+
+	// TRUQUE ANTI-PANIC: Blindando o sistema de Gamificação
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
 		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
 		return
@@ -27,18 +31,16 @@ func RewardXP(c *gin.Context) {
 		return
 	}
 
-	// 1. Define quantos pontos a ação vale
 	xpToAward := 0
 	switch input.Action {
 	case "completed_pomodoro":
-		xpToAward = 50 // Ganha 50 XP por Pomodoro
+		xpToAward = 50
 	case "created_note":
-		xpToAward = 10 // Ganha 10 XP por anotação
+		xpToAward = 10
 	default:
-		xpToAward = 5 // Qualquer outra ação ganha 5 XP
+		xpToAward = 5
 	}
 
-	// 2. Adiciona o XP direto na conta do usuário no banco usando gorm.Expr
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpToAward)).Error; err != nil {
 		c.JSON(500, gin.H{"error": "Erro ao atualizar XP", "detalhe": err.Error()})
 		return

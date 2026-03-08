@@ -55,6 +55,8 @@ func ConnectDB() {
 		&models.StudyCycle{},
 		&models.StudyCycleItem{},
 		&models.StudyPlan{},
+		&models.PomodoroSession{},
+		&models.MoodCheckIn{},
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
