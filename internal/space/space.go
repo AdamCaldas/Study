@@ -94,32 +94,65 @@ func ListSpaces(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"spaces": spaces})
 }
 
-// --- ESTRUTURA PARA EDITAR SPACE ---
+// Usamos ponteiros (*bool) para os booleanos para o Go aceitar quando o front mandar "false"
 type UpdateSpaceInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	ColorHex    string `json:"color_hex"`
-	Category    string `json:"category"`
-	Visibility  string `json:"visibility"`
+	Name               string `json:"name"`
+	Description        string `json:"description"`
+	ColorHex           string `json:"color_hex"`
+	Category           string `json:"category"`
+	Visibility         string `json:"visibility"`
+	Status             string `json:"status"`              // Para o toggle de Space Ativo
+	AllowCollaborators *bool  `json:"allow_collaborators"` // Toggle permitir colaboradores
+	AllowComments      *bool  `json:"allow_comments"`      // Toggle comentários
+	MaxCollaborators   int    `json:"max_collaborators"`   // Slider de limite de membros
 }
 
-// UpdateSpace - Atualiza os dados de um Space existente
+// UpdateSpace - Atualiza as configurações e permissões
 func UpdateSpace(c *gin.Context) {
 	spaceID := c.Param("space_id")
-
 	var input UpdateSpaceInput
+
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos para atualização"})
+		c.JSON(400, gin.H{"error": "Dados inválidos", "detalhe": err.Error()})
 		return
 	}
 
-	// O GORM usa o .Updates para alterar apenas as colunas que vieram no JSON
-	if err := database.DB.Model(&models.Space{}).Where("id = ?", spaceID).Updates(input).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao atualizar o Space no banco de dados"})
+	// Montamos um Map apenas com os campos que o front enviou
+	updates := map[string]interface{}{}
+	if input.Name != "" {
+		updates["name"] = input.Name
+	}
+	if input.Description != "" {
+		updates["description"] = input.Description
+	}
+	if input.ColorHex != "" {
+		updates["color_hex"] = input.ColorHex
+	}
+	if input.Category != "" {
+		updates["category"] = input.Category
+	}
+	if input.Visibility != "" {
+		updates["visibility"] = input.Visibility
+	}
+	if input.Status != "" {
+		updates["status"] = input.Status
+	}
+	if input.MaxCollaborators > 0 {
+		updates["max_collaborators"] = input.MaxCollaborators
+	}
+	if input.AllowCollaborators != nil {
+		updates["allow_collaborators"] = *input.AllowCollaborators
+	}
+	if input.AllowComments != nil {
+		updates["allow_comments"] = *input.AllowComments
+	}
+
+	if err := database.DB.Model(&models.Space{}).Where("id = ?", spaceID).Updates(updates).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao atualizar Space", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "Space atualizado com sucesso!"})
+	c.JSON(200, gin.H{"message": "Configurações salvas!"})
 }
 
 // DeleteSpace - Apaga um Space do banco de dados
@@ -135,17 +168,25 @@ func DeleteSpace(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Space deletado com sucesso!"})
 }
 
-// GetSpaceByCode - Busca um space público/compartilhado pelo código (SPACE-123)
+// GetSpaceByCode - Busca o Space pelo código de compartilhamento
 func GetSpaceByCode(c *gin.Context) {
 	code := c.Param("code")
-
 	var space models.Space
+
 	if err := database.DB.Where("share_code = ?", code).First(&space).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Space não encontrado ou código inválido"})
+		c.JSON(404, gin.H{"error": "Space inválido ou não encontrado"})
 		return
 	}
 
-	c.JSON(200, space)
+	// Busca o nome do dono na tabela de Usuários
+	var owner models.User
+	database.DB.Select("full_name").Where("id = ?", space.OwnerID).First(&owner)
+
+	// Devolve o Space, a data de criação já vai junto nativamente, e agora o nome do dono também!
+	c.JSON(200, gin.H{
+		"space":      space,
+		"owner_name": owner.FullName,
+	})
 }
 
 // JoinSpaceByCode - Permite que o usuário logado entre em um Space usando o código
