@@ -74,18 +74,27 @@ func CreateSpace(c *gin.Context) {
 	})
 }
 
-// Lista os Spaces do usuário logado
+// ListSpaces - Retorna os Spaces que o usuário é dono OU convidado
 func ListSpaces(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	var spaces []models.Space
-
-	// Busca no banco todos os Spaces onde o owner_id é igual ao ID do usuário
-	if err := database.DB.Where("owner_id = ?", userID).Find(&spaces).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar Spaces"})
+	userIDContext, _ := c.Get("userID")
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"spaces": spaces})
+	var spaces []models.Space
+
+	// MÁGICA AQUI: Busca no banco os Spaces onde eu sou o OwnerID OU onde meu ID está na tabela de permissões!
+	if err := database.DB.Where("owner_id = ?", userID).
+		Or("id IN (SELECT space_id FROM space_permissions WHERE user_id = ?)", userID).
+		Find(&spaces).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao buscar Spaces", "detalhe": err.Error()})
+		return
+	}
+
+	c.JSON(200, gin.H{"spaces": spaces})
 }
 
 // Usamos ponteiros (*bool) para os booleanos para o Go aceitar quando o front mandar "false"
