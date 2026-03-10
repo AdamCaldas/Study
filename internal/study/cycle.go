@@ -1,6 +1,7 @@
 package study
 
 import (
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -79,26 +80,41 @@ func CreateStudyCycle(c *gin.Context) {
 	})
 }
 
-// Lista os ciclos de um Space, trazendo também os itens associados
-func ListStudyCycles(c *gin.Context) {
-	userID, _ := c.Get("userID")
+// ListCycles - Lista os ciclos de estudo (roleta) do Space
+func ListCycles(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Segurança
+	// 1. Pega o ID do usuário logado
+	userIDContext, _ := c.Get("userID")
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
+		return
+	}
+
+	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado"})
+	var permission models.SpacePermission
+
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
+
+	// Se não for dono e não for convidado, BLOQUEIA!
+	if !isOwner && !isGuest {
+		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver os Ciclos deste Space."})
 		return
 	}
 
+	// 3. BUSCA OS CICLOS (Com os itens embutidos usando Preload)
 	var cycles []models.StudyCycle
-	// Preload("Items") diz ao GORM para fazer um JOIN e trazer os itens automaticamente!
 	if err := database.DB.Preload("Items").Where("space_id = ?", spaceID).Find(&cycles).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar ciclos"})
+		c.JSON(500, gin.H{"error": "Erro ao carregar os ciclos", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"cycles": cycles})
+	// Devolve os ciclos para o Front-end
+	c.JSON(200, gin.H{"cycles": cycles})
 }
 
 // AdvanceCycleStep move o ponteiro do ciclo para a próxima matéria usando matemática modular

@@ -1,6 +1,7 @@
 package study
 
 import (
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -58,25 +59,41 @@ func CreateStudyPlan(c *gin.Context) {
 	})
 }
 
-func ListStudyPlans(c *gin.Context) {
-	userID, _ := c.Get("userID")
+// ListPlans - Lista os planos de estudo (agenda semanal) do Space
+func ListPlans(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Garante acesso ao Space
+	// 1. Pega o ID do usuário logado
+	userIDContext, _ := c.Get("userID")
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
+		return
+	}
+
+	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado"})
+	var permission models.SpacePermission
+
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
+
+	// Se não for dono e não for convidado, BLOQUEIA!
+	if !isOwner && !isGuest {
+		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver a Agenda deste Space."})
 		return
 	}
 
-	// Busca todos os horários daquele Space, ordenados pelo Dia da Semana e depois pelo Horário de Início
+	// 3. BUSCA OS PLANOS (Agenda)
 	var plans []models.StudyPlan
-	if err := database.DB.Where("space_id = ?", spaceID).Order("day_of_week asc, start_time asc").Find(&plans).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar cronograma"})
+	if err := database.DB.Where("space_id = ?", spaceID).Find(&plans).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro ao carregar a agenda", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"plans": plans})
+	// Devolve os planos para o Front-end
+	c.JSON(200, gin.H{"plans": plans})
 }
 
 type UpdateStudyPlanInput struct {

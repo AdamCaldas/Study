@@ -1,6 +1,7 @@
 package notebook
 
 import (
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -58,25 +59,41 @@ func CreateNotebook(c *gin.Context) {
 	})
 }
 
-// Lista todos os cadernos de um Space específico
+// Exemplo de como deve ficar a sua função ListNotebooks (ou GetAll)
 func ListNotebooks(c *gin.Context) {
-	userID, _ := c.Get("userID")
 	spaceID := c.Param("space_id")
 
-	// Garante que o usuário só liste cadernos de um Space que ele tem acesso
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
+	// Pega o ID do usuário logado (Dono ou Convidado)
+	userIDContext, _ := c.Get("userID")
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
 		return
 	}
 
+	// 1. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
+	// Verifica se o usuário é o DONO do Space OU se ele está na tabela de CONVIDADOS (SpacePermissions)
+	var space models.Space
+	var permission models.SpacePermission
+
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
+
+	// Se não for dono e não for convidado, BLOQUEIA!
+	if !isOwner && !isGuest {
+		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver este Space."})
+		return
+	}
+
+	// 2. BUSCA OS CADERNOS (Se passou da segurança, libera a leitura)
 	var notebooks []models.Notebook
 	if err := database.DB.Where("space_id = ?", spaceID).Find(&notebooks).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar Cadernos"})
+		c.JSON(500, gin.H{"error": "Erro ao carregar os cadernos", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
+	c.JSON(200, gin.H{"notebooks": notebooks})
 }
 
 // DeleteNotebook - Apaga um caderno e tudo dentro dele

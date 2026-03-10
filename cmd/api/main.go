@@ -115,13 +115,13 @@ func main() {
 
 			// Planos de Estudo (CRUD Completo)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
-			spaceRoutes.GET("/plans", study.ListStudyPlans)
+			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
 			// Ciclos de Estudo (CRUD Completo)
 			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
-			spaceRoutes.GET("/cycles", study.ListStudyCycles)
+			spaceRoutes.GET("/cycles", study.ListCycles)
 			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
 		}

@@ -1,6 +1,7 @@
 package space
 
 import (
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -58,24 +59,41 @@ func CreateQuickNote(c *gin.Context) {
 	})
 }
 
+// ListQuickNotes - Lista as notas rápidas (post-its) do Space
 func ListQuickNotes(c *gin.Context) {
-	userID, _ := c.Get("userID")
 	spaceID := c.Param("space_id")
 
-	// Segurança: O usuário só pode ver notas de Spaces dele
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
+	// 1. Pega o ID do utilizador logado
+	userIDContext, _ := c.Get("userID")
+	userIDStr := fmt.Sprintf("%v", userIDContext)
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(400, gin.H{"error": "ID de utilizador inválido"})
 		return
 	}
 
+	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
+	var space models.Space
+	var permission models.SpacePermission
+
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
+
+	// Se não for dono e não for convidado, BLOQUEIA!
+	if !isOwner && !isGuest {
+		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver as Notas deste Space."})
+		return
+	}
+
+	// 3. BUSCA AS NOTAS (Se passou da segurança, liberta a leitura)
 	var notes []models.QuickNote
 	if err := database.DB.Where("space_id = ?", spaceID).Find(&notes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar Notas"})
+		c.JSON(500, gin.H{"error": "Erro ao carregar as notas", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"notes": notes})
+	// Devolve as notas para o Front-end
+	c.JSON(200, gin.H{"notes": notes})
 }
 
 type UpdateQuickNoteInput struct {
