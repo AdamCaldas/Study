@@ -84,12 +84,14 @@ func ListSpaces(c *gin.Context) {
 		return
 	}
 
-	var spaces []models.Space
+	// Inicializa o array vazio para o Front-end não quebrar (evita devolver 'null')
+	spaces := []models.Space{}
 
-	// MÁGICA AQUI: Busca no banco os Spaces onde eu sou o OwnerID OU onde meu ID está na tabela de permissões!
-	if err := database.DB.Where("owner_id = ?", userID).
-		Or("id IN (SELECT space_id FROM space_permissions WHERE user_id = ?)", userID).
-		Find(&spaces).Error; err != nil {
+	// Cria a sub-busca de forma segura pelo próprio GORM (pegando os IDs dos spaces que sou convidado)
+	subQuery := database.DB.Model(&models.SpacePermission{}).Select("space_id").Where("user_id = ?", userID)
+
+	// Busca os Spaces onde eu sou Dono OU onde meu ID está na sub-busca acima
+	if err := database.DB.Where("owner_id = ?", userID).Or("id IN (?)", subQuery).Find(&spaces).Error; err != nil {
 		c.JSON(500, gin.H{"error": "Erro ao buscar Spaces", "detalhe": err.Error()})
 		return
 	}
