@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 
+	"studfy-backend/internal/admin" // <-- Importação do Modo Deus adicionada aqui!
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
@@ -133,6 +134,26 @@ func main() {
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
 	}
 
+	// ==========================================================
+	// ⚡ ROTAS MODO DEUS (ADMIN / DEV) ⚡
+	// ==========================================================
+	godMode := router.Group("/v1/admin")
+
+	// Usa DOIS seguranças: Tem que estar logado (Auth) E tem que ser DEV (AdminOnly)
+	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
+	{
+		// A Rota do Relatório (Testaremos esta primeiro)
+		godMode.GET("/report", admin.GetPlatformReport)
+
+		// Futuras rotas que vamos criar:
+		// godMode.GET("/users", admin.ListAllUsers)
+		// godMode.PUT("/users/:id/password", admin.ForceChangePassword)
+		// godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
+	}
+
+	// ----------------------------------------------------------
+	// INICIALIZAÇÃO DO SERVIDOR
+	// ----------------------------------------------------------
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

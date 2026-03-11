@@ -141,3 +141,33 @@ func CheckSpaceAccess() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// AdminOnly - Middleware que bloqueia qualquer um que não seja DEV ou ADMIN
+func AdminOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDContext, exists := c.Get("userID")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autorizado"})
+			c.Abort()
+			return
+		}
+
+		// Busca o usuário no banco para ver qual é o "AccountType" dele
+		var user models.User
+		if err := database.DB.Select("account_type").First(&user, "id = ?", userIDContext).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não encontrado"})
+			c.Abort()
+			return
+		}
+
+		// A MÁGICA DA SEGURANÇA: Se não for ADMIN nem DEV, chuta pra fora!
+		if user.AccountType != "ADMIN" && user.AccountType != "DEV" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "ACESSO NEGADO: Área restrita para Desenvolvedores."})
+			c.Abort()
+			return
+		}
+
+		// Se for DEV, libera a passagem!
+		c.Next()
+	}
+}
