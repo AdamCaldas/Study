@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"studfy-backend/internal/admin" // <-- Importação do Modo Deus adicionada aqui!
+	"studfy-backend/internal/admin"
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
@@ -144,11 +144,11 @@ func main() {
 	{
 		// A Rota do Relatório (Testaremos esta primeiro)
 		godMode.GET("/report", admin.GetPlatformReport)
+		// --- PILAR 1: GESTÃO DE USUÁRIOS ---
+		godMode.GET("/users", admin.ListAllUsers)
+		godMode.PUT("/users/:id", admin.UpdateAnyUser)
+		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
 
-		// Futuras rotas que vamos criar:
-		// godMode.GET("/users", admin.ListAllUsers)
-		// godMode.PUT("/users/:id/password", admin.ForceChangePassword)
-		// godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
 	}
 
 	// ----------------------------------------------------------
