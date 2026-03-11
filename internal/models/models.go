@@ -21,6 +21,10 @@ type User struct {
 	CreatedAt        time.Time      `json:"created_at"`
 	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
 	XP               int            `json:"xp" gorm:"default:0"`
+	LastLoginAt      time.Time      `json:"last_login_at"`
+	CurrentStreak    int            `json:"current_streak" gorm:"default:0"`
+	HighestStreak    int            `json:"highest_streak" gorm:"default:0"`
+	DevicePlatform   string         `json:"device_platform"`
 }
 
 // SPACE
@@ -42,6 +46,7 @@ type Space struct {
 	IsArchived         bool `gorm:"default:false" json:"is_archived"`
 	IsShared           bool `gorm:"default:false" json:"is_shared"`
 	MaxCollaborators   int  `gorm:"default:10" json:"max_collaborators"`
+	ViewCount          int  `json:"view_count" gorm:"default:0"`
 
 	// Relacionamentos em Cascata
 	Notebooks []Notebook `gorm:"foreignKey:SpaceID;constraint:OnDelete:CASCADE" json:"notebooks"`
@@ -116,17 +121,19 @@ type StudyPlan struct {
 
 // POMODORO SESSION
 type PomodoroSession struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
-	Duration  int       `json:"duration_minutes"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID     uuid.UUID  `gorm:"type:uuid;index" json:"user_id"`
+	Duration   int        `json:"duration_minutes"`
+	CreatedAt  time.Time  `json:"created_at"`
+	SpaceID    *uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
+	NotebookID *uuid.UUID `gorm:"type:uuid;index" json:"notebook_id"`
 }
 
 // MOOD CHECK-IN (Humor)
 type MoodCheckIn struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
-	Mood      string    `gorm:"size:50;not null" json:"mood"` // Ex: "Focado", "Cansado", "Animado"
+	Mood      string    `gorm:"size:50;not null" json:"mood"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -145,4 +152,55 @@ type Review struct {
 	ReviewDate time.Time `json:"review_date"`
 	Status     string    `gorm:"size:20;not null" json:"status"` // ex: "revisado", "pendente"
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// QUIZ / SIMULADO (O cabeçalho da prova)
+type Quiz struct {
+	ID          uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID      `gorm:"type:uuid;index" json:"space_id"`
+	Title       string         `gorm:"size:255;not null" json:"title"`
+	Description string         `json:"description"`
+	Questions   []QuizQuestion `gorm:"foreignKey:QuizID;constraint:OnDelete:CASCADE" json:"questions"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
+// QUIZ QUESTION (As perguntas da prova)
+type QuizQuestion struct {
+	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	QuizID        uuid.UUID `gorm:"type:uuid;index" json:"quiz_id"`
+	QuestionText  string    `gorm:"type:text;not null" json:"question_text"`
+	QuestionType  string    `gorm:"size:50;not null" json:"question_type"` // "multiple_choice" ou "open_ended"
+	Options       string    `gorm:"type:jsonb" json:"options"`             // Array JSON. Ex: '["A) 2", "B) 4"]'
+	CorrectAnswer string    `gorm:"type:text" json:"correct_answer"`       // A resposta certa
+	Points        int       `gorm:"default:1" json:"points"`               // Quanto vale a questão
+}
+
+// QUIZ / SIMULADOS (Para relatórios de notas e gargalos)
+type QuizResult struct {
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID         uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
+	SpaceID        uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
+	Score          float64   `json:"score"`
+	TotalQuestions int       `json:"total_questions"`
+	Status         string    `gorm:"size:20;default:'completed'" json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// LOG DE ATIVIDADE DIÁRIA (Para Mapas de Calor, Horários de Pico e Dispositivos)
+type ActivityLog struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
+	Action    string    `gorm:"size:100;not null" json:"action"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+}
+
+// HISTÓRICO DE PAGAMENTOS (Para relatórios Financeiros B2B - MRR, Inadimplência)
+type PaymentHistory struct {
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID         uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
+	Amount         float64   `json:"amount"`
+	Currency       string    `gorm:"size:3;default:'BRL'" json:"currency"`
+	Status         string    `gorm:"size:20;not null" json:"status"` // "PAID", "FAILED", "REFUNDED"
+	PaymentDate    time.Time `json:"payment_date"`
+	SubscriptionID string    `json:"subscription_id"` // ID do gateway (Stripe/MercadoPago)
 }

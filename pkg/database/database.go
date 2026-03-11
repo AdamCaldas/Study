@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"studfy-backend/internal/models" // Importa nossas Structs
+	"studfy-backend/internal/models"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -20,10 +20,9 @@ func ConnectDB() {
 		log.Fatal("Erro: DATABASE_URL não encontrada no arquivo .env")
 	}
 
-	// Juntamos o Secret (PrepareStmt) com o Logger em um único comando
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		PrepareStmt: false,                               // ESSENCIAL para o Pooler do Supabase (Porta 6543)
-		Logger:      logger.Default.LogMode(logger.Info), // Mantém logs detalhados no terminal
+		PrepareStmt: false,
+		Logger:      logger.Default.LogMode(logger.Info),
 	})
 
 	if err != nil {
@@ -57,6 +56,13 @@ func ConnectDB() {
 		&models.StudyPlan{},
 		&models.PomodoroSession{},
 		&models.MoodCheckIn{},
+		&models.SpaceTag{},
+		&models.Review{},
+		&models.QuizResult{},
+		&models.ActivityLog{},
+		&models.PaymentHistory{},
+		&models.Quiz{},
+		&models.QuizQuestion{},
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)

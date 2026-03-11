@@ -125,6 +125,9 @@ func main() {
 			spaceRoutes.GET("/cycles", study.ListCycles)
 			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
+			// Simulados / Quizzes (CRUD)
+			spaceRoutes.POST("/quizzes", study.CreateQuiz)
+			spaceRoutes.GET("/quizzes", study.ListQuizzes)
 		}
 
 		// --- ROTAS DE PÁGINAS (CRUD Completo) ---
@@ -154,6 +157,11 @@ func main() {
 		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)
 		godMode.DELETE("/spaces/:id/collaborators/:user_id", admin.RemoveUserFromSpace)
 		godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
+
+		// --- PILAR 3: RELATÓRIOS E MÉTRICAS ---
+		godMode.GET("/reports/plans", admin.GetUsersByPlan)  // Gráfico de Conversão
+		godMode.GET("/reports/ranking", admin.GetTopUsersXP) // Tabela de Engajamento
+		godMode.GET("/reports/moods", admin.GetMoodStats)
 
 	}
 
