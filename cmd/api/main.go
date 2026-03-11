@@ -149,6 +149,12 @@ func main() {
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
 
+		// --- PILAR 2: CONTROLE DE CONTEÚDO ---
+		godMode.GET("/spaces", admin.ListAllSpaces)
+		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)
+		godMode.DELETE("/spaces/:id/collaborators/:user_id", admin.RemoveUserFromSpace)
+		godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
+
 	}
 
 	// ----------------------------------------------------------
