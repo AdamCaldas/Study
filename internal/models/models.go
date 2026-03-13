@@ -189,6 +189,7 @@ type QuizResult struct {
 // LOG DE ATIVIDADE DIÁRIA (Para Mapas de Calor, Horários de Pico e Dispositivos)
 type ActivityLog struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID   uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
 	Action    string    `gorm:"size:100;not null" json:"action"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`

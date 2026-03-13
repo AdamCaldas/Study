@@ -154,3 +154,40 @@ func UpdatePage(c *gin.Context) {
 
 	c.JSON(200, gin.H{"message": "Página atualizada com sucesso!"})
 }
+
+// Estrutura que o Front vai mandar no Body
+type ReorderPagesRequest struct {
+	Pages []struct {
+		PageID string `json:"page_id"`
+		Order  int    `json:"order"`
+	} `json:"pages"`
+}
+
+// ReorderPages - Salva a nova ordem de várias páginas de uma vez
+func ReorderPages(c *gin.Context) {
+	var req ReorderPagesRequest
+
+	// 1. Recebe o Array do Front-end
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido. Envie um array de pages."})
+		return
+	}
+
+	// 2. Inicia uma transação no banco (Se der erro em uma página, desfaz tudo)
+	tx := database.DB.Begin()
+
+	// 3. Loop pelas páginas recebidas para atualizar a ordem de cada uma
+	for _, p := range req.Pages {
+		// Atualiza apenas a coluna 'order' daquela página específica
+		if err := tx.Model(&models.Page{}).Where("id = ?", p.PageID).Update("order", p.Order).Error; err != nil {
+			tx.Rollback() // Deu ruim? Cancela as trocas!
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao reordenar as páginas", "detalhe": err.Error()})
+			return
+		}
+	}
+
+	// 4. Salva todas as alterações
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Ordem das páginas atualizada com sucesso!"})
+}

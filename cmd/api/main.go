@@ -99,6 +99,9 @@ func main() {
 			spaceRoutes.DELETE("", space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
 
+			// 👇 1. ADICIONE A ROTA DE HISTÓRICO AQUI 👇
+			spaceRoutes.GET("/history", space.GetSpaceHistory)
+
 			// Cadernos (CRUD Completo)
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
@@ -135,6 +138,7 @@ func main() {
 		protected.GET("/notebooks/:notebook_id/pages", notebook.ListPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
+		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
 	}
 
 	// ==========================================================
