@@ -97,6 +97,7 @@ type StudyCycle struct {
 	ID          uuid.UUID        `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID        `gorm:"type:uuid;index" json:"space_id"`
 	CurrentStep int              `gorm:"default:0" json:"current_step"`
+	IsActive    bool             `gorm:"default:false" json:"is_active"` // 👈 COLOCA ESSA LINHA!
 	Items       []StudyCycleItem `gorm:"foreignKey:CycleID;constraint:OnDelete:CASCADE" json:"items"`
 }
 
@@ -117,6 +118,7 @@ type StudyPlan struct {
 	EndTime    string    `json:"end_time"`
 	NotebookID uuid.UUID `gorm:"type:uuid" json:"notebook_id"`
 	Activity   string    `json:"activity"`
+	ColorHex   string    `gorm:"size:7;default:'#3B82F6'" json:"color_hex"` // 👈 E ESSA AQUI!
 }
 
 // POMODORO SESSION

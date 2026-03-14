@@ -29,24 +29,23 @@ func main() {
 
 	router := gin.Default()
 
+	// ==========================================================
+	// 🌐 CONFIGURAÇÃO DE CORS E HEADERS
+	// ==========================================================
 	router.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{
-			"Origin",
-			"Content-Type",
-			"Content-Length",
-			"Accept-Encoding",
-			"X-CSRF-Token",
-			"Authorization",
-			"Accept",
-			"Cache-Control",
-			"X-Requested-With",
+			"Origin", "Content-Type", "Content-Length", "Accept-Encoding",
+			"X-CSRF-Token", "Authorization", "Accept", "Cache-Control", "X-Requested-With",
 		},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 	}))
 
+	// ==========================================================
+	// 🔓 ROTAS PÚBLICAS (Sem Autenticação)
+	// ==========================================================
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "pong! Servidor StudFy conectado ao banco 🚀"})
 	})
@@ -54,125 +53,138 @@ func main() {
 	router.POST("/v1/register", auth.Register)
 	router.POST("/v1/login", auth.Login)
 
+	// ==========================================================
+	// 🛡️ ROTAS PROTEGIDAS DO APP (Exigem Token JWT)
+	// ==========================================================
 	protected := router.Group("/v1/app")
 	protected.Use(auth.AuthMiddleware())
 	{
+		// ------------------------------------------------------
+		// 👤 1. USUÁRIO E PERFIL
+		// ------------------------------------------------------
 		protected.GET("/me", func(c *gin.Context) {
 			userID, exists := c.Get("userID")
 			if !exists {
 				c.JSON(401, gin.H{"error": "Usuário não identificado"})
 				return
 			}
-
-			// Busca os dados completos no banco de dados
 			var user models.User
 			if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
 				c.JSON(404, gin.H{"error": "Usuário não encontrado no banco"})
 				return
 			}
-
-			// Devolve o objeto usuário completo para o Front-end
 			c.JSON(200, user)
 		})
 
-		// Rota de Gamificação
+		// ------------------------------------------------------
+		// 🎮 2. GAMIFICAÇÃO E FOCO (Pomodoro / Mood)
+		// ------------------------------------------------------
 		protected.POST("/gamification/reward", gamification.RewardXP)
-
-		// Rotas de Foco e Produtividade
 		protected.POST("/focus/pomodoro", focus.RegisterPomodoro)
 		protected.POST("/focus/mood", focus.RegisterMood)
 
-		// Rotas Gerais de Spaces (Criar e Listar os meus Spaces)
+		// ------------------------------------------------------
+		// 🪐 3. SPACES - ROTAS GERAIS E CONVITES
+		// ------------------------------------------------------
 		protected.POST("/spaces", auth.CheckSpaceLimit(), space.CreateSpace)
 		protected.GET("/spaces", space.ListSpaces)
 
-		// --- ROTAS DO FRONT-END (Código e Entrar) ---
-		protected.GET("/spaces/code/:code", space.GetSpaceByCode)
-		protected.POST("/spaces/join", space.JoinSpaceByCode)
+		protected.GET("/spaces/code/:code", space.GetSpaceByCode) // Pre-view do convite
+		protected.POST("/spaces/join", space.JoinSpaceByCode)     // Aceitar convite
 
-		// --- GRUPO: CONTROLE DE ACESSO PARA AMIGOS E EDIÇÃO ---
+		// ------------------------------------------------------
+		// 📊 4. DASHBOARD (Raio-X Completo do Space)
+		// ------------------------------------------------------
+		// Isolado aqui para não dar conflito com a rota de código acima!
+		dashboardRoutes := protected.Group("/dashboard/:space_id")
+		dashboardRoutes.Use(auth.CheckSpaceAccess())
+		{
+			dashboardRoutes.GET("", space.GetSpaceDashboard)
+		}
+
+		// ======================================================
+		// 🛠️ 5. GESTÃO INTERNA DO SPACE (Apenas quem tem acesso)
+		// ======================================================
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
-			spaceRoutes.GET("", space.GetSpaceDashboard)
-
-			// Edição do Space Próprio
+			// 👉 Configurações do Space Próprio
 			spaceRoutes.PUT("", space.UpdateSpace)
 			spaceRoutes.DELETE("", space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
+			spaceRoutes.GET("/history", space.GetSpaceHistory) // Timeline de Atividades
 
-			// 👇 1. ADICIONE A ROTA DE HISTÓRICO AQUI 👇
-			spaceRoutes.GET("/history", space.GetSpaceHistory)
-
-			// Cadernos (CRUD Completo)
+			// 👉 Cadernos (Notebooks)
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
 
-			// Notas Rápidas / Post-its (CRUD Completo)
+			// 👉 Notas Rápidas (Post-its)
 			spaceRoutes.POST("/notes", space.CreateQuickNote)
 			spaceRoutes.GET("/notes", space.ListQuickNotes)
 			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
-			// Revisões
-			spaceRoutes.POST("/reviews", study.CreateReview)
-
-			// Planos de Estudo (CRUD Completo)
+			// 👉 Plano de Estudos (Agenda Semanal)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
 			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
-			// Ciclos de Estudo (CRUD Completo)
+			// 👉 Ciclos de Estudo (A Roleta)
 			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
 			spaceRoutes.GET("/cycles", study.ListCycles)
-			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
+			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep) // Próxima matéria
+			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)   // Favoritar Ciclo
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
-			// Simulados / Quizzes (CRUD)
+
+			// 👉 Revisões e Quizzes
+			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
 			spaceRoutes.GET("/quizzes", study.ListQuizzes)
 		}
 
-		// --- ROTAS DE PÁGINAS (CRUD Completo) ---
+		// ------------------------------------------------------
+		// 📄 6. PÁGINAS (CRUD e Drag & Drop)
+		// ------------------------------------------------------
 		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
 		protected.GET("/notebooks/:notebook_id/pages", notebook.ListPages)
+		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages) // Nova!
+
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
-		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
 	}
 
 	// ==========================================================
-	// ⚡ ROTAS MODO DEUS (ADMIN / DEV) ⚡
+	// ⚡ MODO DEUS (DASHBOARD ADMIN / DEV) ⚡
 	// ==========================================================
 	godMode := router.Group("/v1/admin")
-
 	// Usa DOIS seguranças: Tem que estar logado (Auth) E tem que ser DEV (AdminOnly)
 	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
 	{
-		// A Rota do Relatório (Testaremos esta primeiro)
+		// Relatório Geral
 		godMode.GET("/report", admin.GetPlatformReport)
-		// --- PILAR 1: GESTÃO DE USUÁRIOS ---
+
+		// 👉 PILAR 1: Gestão de Usuários
 		godMode.GET("/users", admin.ListAllUsers)
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
 
-		// --- PILAR 2: CONTROLE DE CONTEÚDO ---
+		// 👉 PILAR 2: Controle de Conteúdo
 		godMode.GET("/spaces", admin.ListAllSpaces)
 		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)
 		godMode.DELETE("/spaces/:id/collaborators/:user_id", admin.RemoveUserFromSpace)
 		godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
 
-		// --- PILAR 3: RELATÓRIOS E MÉTRICAS ---
+		// 👉 PILAR 3: Relatórios e Métricas
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)  // Gráfico de Conversão
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP) // Tabela de Engajamento
 		godMode.GET("/reports/moods", admin.GetMoodStats)
-
 	}
 
 	// ----------------------------------------------------------
-	// INICIALIZAÇÃO DO SERVIDOR
+	// 🚀 INICIALIZAÇÃO DO SERVIDOR
 	// ----------------------------------------------------------
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -169,3 +169,31 @@ func DeleteStudyCycle(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"message": "Ciclo apagado com sucesso!"})
 }
+
+// ActivateCycle - Define um ciclo como o ativo/favorito do Space
+func ActivateCycle(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	cycleID := c.Param("cycle_id")
+
+	// Inicia uma transação no banco
+	tx := database.DB.Begin()
+
+	// 1. Desativa TODOS os ciclos que pertencem a este Space
+	if err := tx.Model(&models.StudyCycle{}).Where("space_id = ?", spaceID).Update("is_active", false).Error; err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao redefinir os ciclos ativos"})
+		return
+	}
+
+	// 2. Ativa APENAS o ciclo que o usuário clicou
+	if err := tx.Model(&models.StudyCycle{}).Where("id = ? AND space_id = ?", cycleID, spaceID).Update("is_active", true).Error; err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao ativar o ciclo escolhido"})
+		return
+	}
+
+	// Salva as alterações
+	tx.Commit()
+
+	c.JSON(200, gin.H{"message": "Ciclo definido como ativo com sucesso!"})
+}
