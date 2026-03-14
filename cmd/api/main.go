@@ -94,6 +94,8 @@ func main() {
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
+			spaceRoutes.GET("", space.GetSpaceDashboard)
+
 			// Edição do Space Próprio
 			spaceRoutes.PUT("", space.UpdateSpace)
 			spaceRoutes.DELETE("", space.DeleteSpace)
