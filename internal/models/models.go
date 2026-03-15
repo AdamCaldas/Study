@@ -258,3 +258,15 @@ type SpaceJoinRequest struct {
 	Status    string    `gorm:"size:20;default:'pending'" json:"status"` // pending, approved, rejected
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
+
+// ==========================================================
+// REGRA DE GAMIFICAÇÃO (O Motor de XP Dinâmico)
+// ==========================================================
+type GamificationRule struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ActionName  string    `gorm:"size:100;unique;not null" json:"action_name"` // ex: "complete_pomodoro", "create_summary"
+	RewardXP    int       `gorm:"not null;default:0" json:"reward_xp"`         // Quanto XP ganha
+	DailyLimit  int       `gorm:"default:0" json:"daily_limit"`                // Limite de vezes por dia (0 = ilimitado)
+	Description string    `json:"description"`                                 // Ex: "Completar um Pomodoro de 25 min"
+	UpdatedAt   time.Time `json:"updated_at"`
+}

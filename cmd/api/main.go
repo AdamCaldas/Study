@@ -168,6 +168,12 @@ func main() {
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
+
+		// 🎯 GESTÃO DE GAMIFICAÇÃO (NOVO)
+		godMode.PUT("/users/:id/xp", admin.UpdateUserXP)
+		godMode.GET("/gamification/rules", admin.ListGamificationRules)
+		godMode.POST("/gamification/rules", admin.CreateGamificationRule)
+		godMode.PUT("/gamification/rules/:rule_id", admin.UpdateGamificationRule)
 	}
 
 	port := os.Getenv("PORT")
