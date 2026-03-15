@@ -18,8 +18,20 @@ type CreatePageInput struct {
 	Order   int             `json:"order"`
 }
 
+// ==========================================================
+// CREATE PAGE - Permite Donos e EDITORES criarem páginas
+// ==========================================================
 func CreatePage(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	// Pega o ID de forma segura
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	notebookID := c.Param("notebook_id")
 
 	// 1. Busca o Caderno
@@ -29,10 +41,16 @@ func CreatePage(c *gin.Context) {
 		return
 	}
 
-	// 2. Segurança (Path Logic): Verifica se o usuário é o dono do Space desse caderno
+	// 2. 🛡️ SEGURANÇA INTELIGENTE: É Dono OU Editor?
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", notebook.SpaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para adicionar páginas neste caderno"})
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", notebook.SpaceID, parsedUserID).First(&space).Error == nil
+
+	var permission models.SpacePermission
+	isEditor := database.DB.Where("space_id = ? AND user_id = ? AND access_level = 'EDITOR'", notebook.SpaceID, parsedUserID).First(&permission).Error == nil
+
+	// Se não for dono e não for editor, BLOQUEIA! (403 Forbidden)
+	if !isOwner && !isEditor {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão de EDITOR para adicionar páginas neste caderno"})
 		return
 	}
 
@@ -60,7 +78,7 @@ func CreatePage(c *gin.Context) {
 	if err := database.DB.Create(&newPage).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Erro ao criar Página",
-			"detalhe": err.Error(), // 👈 A MÁGICA TÁ AQUI! Isso vai mostrar o erro real no F12!
+			"detalhe": err.Error(),
 		})
 		return
 	}
@@ -71,9 +89,20 @@ func CreatePage(c *gin.Context) {
 	})
 }
 
-// Lista todas as páginas de um caderno com suporte a Breadcrumbs
+// ==========================================================
+// LIST PAGES - Permite Donos, Viewers e Editores lerem
+// ==========================================================
 func ListPages(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	// Pega o ID de forma segura
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	notebookID := c.Param("notebook_id")
 
 	// 1. Busca o Caderno
@@ -83,10 +112,15 @@ func ListPages(c *gin.Context) {
 		return
 	}
 
-	// 2. Segurança: valida se o usuário tem acesso ao Space
+	// 2. 🛡️ SEGURANÇA INTELIGENTE: É Dono ou Convidado (Qualquer nível)?
 	var space models.Space
-	if err := database.DB.First(&space, "id = ? AND owner_id = ?", notebook.SpaceID, userID).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado"})
+	isOwner := database.DB.First(&space, "id = ? AND owner_id = ?", notebook.SpaceID, parsedUserID).Error == nil
+
+	var permission models.SpacePermission
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", notebook.SpaceID, parsedUserID).First(&permission).Error == nil
+
+	if !isOwner && !isGuest {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado: Você não faz parte deste Space"})
 		return
 	}
 
@@ -98,7 +132,6 @@ func ListPages(c *gin.Context) {
 	}
 
 	// 4. A Mágica dos Breadcrumbs!
-	// Enviamos não só a lista de páginas, mas também os nomes das pastas pai
 	c.JSON(http.StatusOK, gin.H{
 		"breadcrumbs": gin.H{
 			"space_name":    space.Name,

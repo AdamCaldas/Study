@@ -17,14 +17,29 @@ type CreateNotebookInput struct {
 }
 
 func CreateNotebook(c *gin.Context) {
-	// 1. Pega o ID do usuário (do porteiro) e o ID do Space (da URL)
-	userID, _ := c.Get("userID")
+	// 1. Pega o ID de forma segura (igual fizemos no sharing.go)
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	spaceID := c.Param("space_id")
 
-	// 2. Validação de Segurança: O Space existe e pertence a esse usuário?
+	// 2. 🛡️ O NOVO LEÃO DE CHÁCARA (Checa Dono OU Editor)
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Space não encontrado ou acesso negado"})
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, parsedUserID).First(&space).Error == nil
+
+	var permission models.SpacePermission
+	// Busca se o cara tá na tabela de permissões com a tag "EDITOR"
+	isEditor := database.DB.Where("space_id = ? AND user_id = ? AND access_level = 'EDITOR'", spaceID, parsedUserID).First(&permission).Error == nil
+
+	// Se ele não for NENHUM dos dois, toma 403 na cara!
+	if !isOwner && !isEditor {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso Negado: Apenas o Dono ou Editores podem criar conteúdo."})
 		return
 	}
 
