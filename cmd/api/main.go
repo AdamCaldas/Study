@@ -62,8 +62,9 @@ func main() {
 		// ------------------------------------------------------
 		// 👤 1. USUÁRIO E PERFIL (Agora limpo e sem conflitos!)
 		// ------------------------------------------------------
-		protected.GET("/me", users.GetMyProfile)    // 👈 Busca Perfil + Spaces Separados
-		protected.PUT("/me", users.UpdateMyProfile) // 👈 Atualiza Nome e Idade
+		protected.GET("/me", users.GetMyProfile)       // 👈 Busca Perfil + Spaces Separados
+		protected.PUT("/me", users.UpdateMyProfile)    // 👈 Atualiza Nome e Idade
+		protected.DELETE("/me", users.DeleteMyAccount) // 👈 BOTÃO VERMELHO ADICIONADO AQUI!
 
 		// ------------------------------------------------------
 		// 🎮 2. GAMIFICAÇÃO E FOCO (Pomodoro / Mood)
@@ -162,20 +163,17 @@ func main() {
 		// Relatório Geral
 		godMode.GET("/report", admin.GetPlatformReport)
 
-		// 👉 PILAR 1: Gestão de Usuários
 		godMode.GET("/users", admin.ListAllUsers)
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
 
-		// 👉 PILAR 2: Controle de Conteúdo
 		godMode.GET("/spaces", admin.ListAllSpaces)
 		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)
 		godMode.DELETE("/spaces/:id/collaborators/:user_id", admin.RemoveUserFromSpace)
 		godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
 
-		// 👉 PILAR 3: Relatórios e Métricas
-		godMode.GET("/reports/plans", admin.GetUsersByPlan)  // Gráfico de Conversão
-		godMode.GET("/reports/ranking", admin.GetTopUsersXP) // Tabela de Engajamento
+		godMode.GET("/reports/plans", admin.GetUsersByPlan)
+		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
 	}
 

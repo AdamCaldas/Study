@@ -15,7 +15,7 @@ import (
 func GetMyProfile(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
-	// 1. Busca os dados do Usuário (Nome, Email, etc)
+	// 1. Busca os dados do Usuário (Nome, Email, Foto, etc)
 	var user models.User
 	if err := database.DB.Where("id = ?", userID).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Usuário não encontrado"})
@@ -26,18 +26,20 @@ func GetMyProfile(c *gin.Context) {
 	var ownedSpaces []models.Space
 	database.DB.Select("id, name, color_hex, category").Where("owner_id = ?", userID).Find(&ownedSpaces)
 
-	// 3. Busca os Spaces que ele é CONVIDADO (Membro)
-	// Fazemos um JOIN matador para trazer o nome do Space e qual o AccessLevel dele lá dentro
+	// 3. Busca os Spaces que ele é CONVIDADO (Membro) - Agora com Nome do Dono e Data!
 	var guestSpaces []struct {
 		SpaceID     string `json:"space_id"`
 		Name        string `json:"name"`
 		ColorHex    string `json:"color_hex"`
 		AccessLevel string `json:"access_level"`
+		OwnerName   string `json:"owner_name"` // 👈 Traz o nome do dono para o Front-end
+		UpdatedAt   string `json:"updated_at"` // 👈 Traz a data de modificação
 	}
 
 	database.DB.Table("spaces").
-		Select("spaces.id as space_id, spaces.name, spaces.color_hex, space_permissions.access_level").
+		Select("spaces.id as space_id, spaces.name, spaces.color_hex, space_permissions.access_level, users.full_name as owner_name, spaces.updated_at").
 		Joins("join space_permissions on space_permissions.space_id = spaces.id").
+		Joins("join users on users.id = spaces.owner_id"). // Faz a ponte para pegar o nome do dono
 		Where("space_permissions.user_id = ?", userID).
 		Scan(&guestSpaces)
 
@@ -48,6 +50,8 @@ func GetMyProfile(c *gin.Context) {
 			Name        string `json:"name"`
 			ColorHex    string `json:"color_hex"`
 			AccessLevel string `json:"access_level"`
+			OwnerName   string `json:"owner_name"`
+			UpdatedAt   string `json:"updated_at"`
 		}{}
 	}
 	if ownedSpaces == nil {
@@ -72,6 +76,7 @@ func UpdateMyProfile(c *gin.Context) {
 	var input struct {
 		FullName string `json:"full_name"`
 		Age      int    `json:"age"`
+		PhotoURL string `json:"photo_url"` // 👈 Novo campo para a foto!
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -83,10 +88,26 @@ func UpdateMyProfile(c *gin.Context) {
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
 		"full_name": input.FullName,
 		"age":       input.Age,
+		"photo_url": input.PhotoURL, // 👈 Salva a foto no banco
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar perfil"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Perfil atualizado com sucesso!"})
+}
+
+// ==========================================================
+// 3️⃣ Deleta a própria conta (O Botão Vermelho)
+// ==========================================================
+func DeleteMyAccount(c *gin.Context) {
+	userID, _ := c.Get("userID")
+
+	// Apaga a conta do usuário no banco de dados
+	if err := database.DB.Where("id = ?", userID).Delete(&models.User{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir conta. Tente novamente mais tarde."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Conta excluída com sucesso. Sentiremos sua falta!"})
 }
