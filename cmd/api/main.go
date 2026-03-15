@@ -8,10 +8,10 @@ import (
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
-	"studfy-backend/internal/models"
 	"studfy-backend/internal/notebook"
 	"studfy-backend/internal/space"
 	"studfy-backend/internal/study"
+	"studfy-backend/internal/users" // 👈 PACOTE NOVO IMPORTADO AQUI!
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-contrib/cors"
@@ -60,21 +60,10 @@ func main() {
 	protected.Use(auth.AuthMiddleware())
 	{
 		// ------------------------------------------------------
-		// 👤 1. USUÁRIO E PERFIL
+		// 👤 1. USUÁRIO E PERFIL (Agora limpo e sem conflitos!)
 		// ------------------------------------------------------
-		protected.GET("/me", func(c *gin.Context) {
-			userID, exists := c.Get("userID")
-			if !exists {
-				c.JSON(401, gin.H{"error": "Usuário não identificado"})
-				return
-			}
-			var user models.User
-			if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
-				c.JSON(404, gin.H{"error": "Usuário não encontrado no banco"})
-				return
-			}
-			c.JSON(200, user)
-		})
+		protected.GET("/me", users.GetMyProfile)    // 👈 Busca Perfil + Spaces Separados
+		protected.PUT("/me", users.UpdateMyProfile) // 👈 Atualiza Nome e Idade
 
 		// ------------------------------------------------------
 		// 🎮 2. GAMIFICAÇÃO E FOCO (Pomodoro / Mood)
@@ -90,12 +79,11 @@ func main() {
 		protected.GET("/spaces", space.ListSpaces)
 
 		protected.GET("/spaces/code/:code", space.GetSpaceByCode) // Pre-view do convite
-		protected.POST("/spaces/join", space.JoinSpaceByCode)     // Aceitar convite
+		protected.POST("/spaces/join", space.RequestSpaceAccess)  // Solicitar acesso (Sala de Espera)
 
 		// ------------------------------------------------------
 		// 📊 4. DASHBOARD (Raio-X Completo do Space)
 		// ------------------------------------------------------
-		// Isolado aqui para não dar conflito com a rota de código acima!
 		dashboardRoutes := protected.Group("/dashboard/:space_id")
 		dashboardRoutes.Use(auth.CheckSpaceAccess())
 		{
@@ -113,6 +101,10 @@ func main() {
 			spaceRoutes.DELETE("", space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
 			spaceRoutes.GET("/history", space.GetSpaceHistory) // Timeline de Atividades
+
+			// 👉 Gestão de Convites (Sala de Espera)
+			spaceRoutes.GET("/requests", space.ListSpaceRequests)                        // Dono vê quem pediu
+			spaceRoutes.POST("/requests/:request_id/respond", space.RespondSpaceRequest) // Dono aceita/rejeita
 
 			// 👉 Cadernos (Notebooks)
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)

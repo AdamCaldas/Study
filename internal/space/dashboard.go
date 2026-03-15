@@ -9,58 +9,59 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetSpaceDashboard - Retorna o Raio-X completo do Space para o Front-end
+// GetSpaceDashboard - Retorna o Raio-X ABSOLUTO do Space (TUDO) para testes no Front-end
 func GetSpaceDashboard(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// 1. Busca os dados principais do Space
+	// 1. Dados principais do Space
 	var space models.Space
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
 		return
 	}
 
-	// 2. Conta os Colaboradores (Membros)
-	var totalCollaborators int64
-	database.DB.Model(&models.SpacePermission{}).Where("space_id = ?", spaceID).Count(&totalCollaborators)
+	// 2. Colaboradores (Permissões completas de quem tá no Space)
+	var permissions []models.SpacePermission
+	database.DB.Where("space_id = ?", spaceID).Find(&permissions)
 
-	// 3. Busca os Cadernos (Apenas os campos necessários para ficar leve)
+	// 3. Cadernos COM AS PÁGINAS (Preload carrega todo o texto JSONB das Pages)
 	var notebooks []models.Notebook
-	database.DB.Select("id, name, color_hex").Where("space_id = ?", spaceID).Find(&notebooks)
+	database.DB.Preload("Pages").Where("space_id = ?", spaceID).Find(&notebooks)
 
-	// Conta quantos cadernos tem
-	totalNotebooks := int64(len(notebooks))
+	// 4. Todos os Ciclos (Ativos e Inativos) COM AS MATÉRIAS (Items)
+	var cycles []models.StudyCycle
+	database.DB.Preload("Items").Where("space_id = ?", spaceID).Find(&cycles)
 
-	// 4. Busca o Ciclo ATIVO (com os itens dele)
-	var activeCycle models.StudyCycle
-	var totalCycles int64
-
-	// Conta todos os ciclos desse space primeiro
-	database.DB.Model(&models.StudyCycle{}).Where("space_id = ?", spaceID).Count(&totalCycles)
-
-	// Busca apenas o que está marcado como IsActive = true e traz os items (Preload)
-	err := database.DB.Preload("Items").Where("space_id = ? AND is_active = ?", spaceID, true).First(&activeCycle).Error
-
-	// Prepara a resposta do ciclo. Se não achar nenhum ativo, manda nil (nulo) pro Front-end saber que não tem.
-	var cycleResponse interface{} = nil
-	if err == nil {
-		cycleResponse = activeCycle
+	// Separa o ciclo ativo para facilitar a vida do Front-end
+	var activeCycle interface{} = nil
+	for _, cycle := range cycles {
+		if cycle.IsActive {
+			activeCycle = cycle
+			break
+		}
 	}
 
-	// 5. Busca os Planos de Estudo (Agenda)
+	// 5. Planos de Estudo (Agenda Completa)
 	var studyPlans []models.StudyPlan
 	database.DB.Where("space_id = ?", spaceID).Find(&studyPlans)
 
-	// 6. Monta o JSON Gigante e devolve com Status 200 OK!
+	// 6. Notas Rápidas / Post-its
+	var quickNotes []models.QuickNote
+	database.DB.Where("space_id = ?", spaceID).Find(&quickNotes)
+
+	// 7. Quizzes / Simulados COM AS PERGUNTAS (Questions)
+	var quizzes []models.Quiz
+	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
+
+	// 8. O JSON GIGANTE COM TUDO
 	c.JSON(http.StatusOK, gin.H{
-		"space": space,
-		"stats": gin.H{
-			"total_collaborators": totalCollaborators,
-			"total_notebooks":     totalNotebooks,
-			"total_cycles":        totalCycles,
-		},
-		"notebooks":    notebooks,
-		"active_cycle": cycleResponse,
+		"space":        space,
+		"permissions":  permissions,
+		"notebooks":    notebooks, // 👈 Agora vai com todas as páginas e o JSONB dentro!
+		"all_cycles":   cycles,    // 👈 Vai com ativos e inativos!
+		"active_cycle": activeCycle,
 		"study_plans":  studyPlans,
+		"quick_notes":  quickNotes, // 👈 Vai com todos os post-its!
+		"quizzes":      quizzes,    // 👈 Vai com todas as perguntas das provas!
 	})
 }

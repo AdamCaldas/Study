@@ -58,6 +58,7 @@ type Space struct {
 
 // SPACE PERMISSIONS (Amigos)
 type SpacePermission struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;primaryKey" json:"space_id"`
 	UserID      uuid.UUID `gorm:"type:uuid;primaryKey" json:"user_id"`
 	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // VIEWER, EDITOR
@@ -206,4 +207,13 @@ type PaymentHistory struct {
 	Status         string    `gorm:"size:20;not null" json:"status"` // "PAID", "FAILED", "REFUNDED"
 	PaymentDate    time.Time `json:"payment_date"`
 	SubscriptionID string    `json:"subscription_id"` // ID do gateway (Stripe/MercadoPago)
+}
+
+// Sala de Espera (Solicitações de Acesso)
+type SpaceJoinRequest struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID   uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
+	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
+	Status    string    `gorm:"size:20;default:'pending'" json:"status"` // pending, approved, rejected
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
