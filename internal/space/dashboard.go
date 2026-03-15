@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetSpaceDashboard - Retorna o Raio-X ABSOLUTO do Space (TUDO) para testes no Front-end
+// GetSpaceDashboard - Retorna o Raio-X ABSOLUTO do Space (TUDO) para o Front-end
 func GetSpaceDashboard(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
@@ -20,24 +20,55 @@ func GetSpaceDashboard(c *gin.Context) {
 		return
 	}
 
-	// 🌟 1.5. BUSCA O DONO DO SPACE (A Mágica para o Front-end)
+	// 🌟 2. BUSCA O DONO DO SPACE
 	var owner models.User
-	// Usamos o Select para NÃO trazer a senha do dono, apenas o que o Front precisa!
-	database.DB.Select("id, full_name, email").Where("id = ?", space.OwnerID).First(&owner)
+	database.DB.Select("id, full_name, email, profile_pic").Where("id = ?", space.OwnerID).First(&owner)
 
-	// 2. Colaboradores (Permissões completas de quem tá no Space)
-	var permissions []models.SpacePermission
-	database.DB.Where("space_id = ?", spaceID).Find(&permissions)
+	// 🌟 3. BUSCA OS COLABORADORES (Permissão Geral do Space)
+	var collaborators []struct {
+		UserID      string `json:"user_id"`
+		FullName    string `json:"full_name"`
+		Email       string `json:"email"`
+		ProfilePic  string `json:"profile_picture_url"`
+		AccessLevel string `json:"access_level"`
+	}
 
-	// 3. Cadernos COM AS PÁGINAS (Preload carrega todo o texto JSONB das Pages)
+	database.DB.Table("space_permissions").
+		Select("users.id as user_id, users.full_name, users.email, users.profile_pic, space_permissions.access_level").
+		Joins("join users on users.id = space_permissions.user_id").
+		Where("space_permissions.space_id = ?", spaceID).
+		Scan(&collaborators)
+
+	if collaborators == nil {
+		collaborators = []struct {
+			UserID      string `json:"user_id"`
+			FullName    string `json:"full_name"`
+			Email       string `json:"email"`
+			ProfilePic  string `json:"profile_picture_url"`
+			AccessLevel string `json:"access_level"`
+		}{}
+	}
+
+	// 📚 4. Cadernos COM AS PÁGINAS (Agora já vêm com as Assinaturas Digitais preenchidas!)
 	var notebooks []models.Notebook
 	database.DB.Preload("Pages").Where("space_id = ?", spaceID).Find(&notebooks)
 
-	// 4. Todos os Ciclos (Ativos e Inativos) COM AS MATÉRIAS (Items)
+	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
+	var notebookPermissions []models.NotebookPermission
+	// Faz um JOIN para buscar apenas as permissões dos cadernos que estão DENTRO deste Space
+	database.DB.Joins("JOIN notebooks ON notebooks.id = notebook_permissions.notebook_id").
+		Where("notebooks.space_id = ?", spaceID).
+		Find(&notebookPermissions)
+
+	// Evita mandar null pro Front
+	if notebookPermissions == nil {
+		notebookPermissions = []models.NotebookPermission{}
+	}
+
+	// 5. Todos os Ciclos (Ativos e Inativos) COM AS MATÉRIAS
 	var cycles []models.StudyCycle
 	database.DB.Preload("Items").Where("space_id = ?", spaceID).Find(&cycles)
 
-	// Separa o ciclo ativo para facilitar a vida do Front-end
 	var activeCycle interface{} = nil
 	for _, cycle := range cycles {
 		if cycle.IsActive {
@@ -46,28 +77,29 @@ func GetSpaceDashboard(c *gin.Context) {
 		}
 	}
 
-	// 5. Planos de Estudo (Agenda Completa)
+	// 6. Planos de Estudo (Agenda Completa)
 	var studyPlans []models.StudyPlan
 	database.DB.Where("space_id = ?", spaceID).Find(&studyPlans)
 
-	// 6. Notas Rápidas / Post-its
+	// 7. Notas Rápidas / Post-its
 	var quickNotes []models.QuickNote
 	database.DB.Where("space_id = ?", spaceID).Find(&quickNotes)
 
-	// 7. Quizzes / Simulados COM AS PERGUNTAS (Questions)
+	// 8. Quizzes / Simulados COM AS PERGUNTAS
 	var quizzes []models.Quiz
 	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
 
-	// 8. O JSON GIGANTE COM TUDO
+	// 🚀 9. O JSON GIGANTE COM TUDO
 	c.JSON(http.StatusOK, gin.H{
-		"space":        space,
-		"owner":        owner, // 👈 ADICIONE ESTA LINHA AQUI!
-		"permissions":  permissions,
-		"notebooks":    notebooks, // 👈 Agora vai com todas as páginas e o JSONB dentro!
-		"all_cycles":   cycles,    // 👈 Vai com ativos e inativos!
-		"active_cycle": activeCycle,
-		"study_plans":  studyPlans,
-		"quick_notes":  quickNotes, // 👈 Vai com todos os post-its!
-		"quizzes":      quizzes,    // 👈 Vai com todas as perguntas das provas!
+		"space":                space,
+		"owner":                owner,
+		"collaborators":        collaborators,
+		"notebooks":            notebooks,
+		"notebook_permissions": notebookPermissions, // 👈 Nova trava enviada ao Front-end!
+		"all_cycles":           cycles,
+		"active_cycle":         activeCycle,
+		"study_plans":          studyPlans,
+		"quick_notes":          quickNotes,
+		"quizzes":              quizzes,
 	})
 }

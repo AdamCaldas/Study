@@ -1,8 +1,8 @@
 package notebook
 
 import (
-	"fmt"
 	"net/http"
+
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -10,40 +10,68 @@ import (
 	"github.com/google/uuid"
 )
 
-// Estrutura que o Frontend vai enviar
+// ==========================================================
+// FUNÇÃO AUXILIAR: Extrai o ID do usuário com segurança
+// ==========================================================
+func getUserID(c *gin.Context) uuid.UUID {
+	userIDInterface, _ := c.Get("userID")
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		return v
+	case string:
+		parsed, _ := uuid.Parse(v)
+		return parsed
+	default:
+		return uuid.Nil
+	}
+}
+
+// ==========================================================
+// 🛡️ O LEÃO DE CHÁCARA GRANULAR
+// Verifica se o usuário pode mexer neste caderno específico
+// ==========================================================
+func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) bool {
+	var space models.Space
+	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err == nil {
+		return true // É o dono do Space
+	}
+
+	var nbPerm models.NotebookPermission
+	if err := database.DB.Where("notebook_id = ? AND user_id = ?", notebookID, userID).First(&nbPerm).Error; err == nil {
+		return nbPerm.AccessLevel == "EDITOR" // Trava Específica
+	}
+
+	var spPerm models.SpacePermission
+	if err := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&spPerm).Error; err == nil {
+		return spPerm.AccessLevel == "EDITOR" // Trava Geral
+	}
+
+	return false
+}
+
+// ==========================================================
+// 1️⃣ CREATE NOTEBOOK
+// ==========================================================
 type CreateNotebookInput struct {
 	Name     string `json:"name" binding:"required"`
 	ColorHex string `json:"color_hex"`
 }
 
 func CreateNotebook(c *gin.Context) {
-	// 1. Pega o ID de forma segura (igual fizemos no sharing.go)
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
-	}
+	parsedUserID := getUserID(c)
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, _ := uuid.Parse(spaceIDStr)
 
-	spaceID := c.Param("space_id")
-
-	// 2. 🛡️ O NOVO LEÃO DE CHÁCARA (Checa Dono OU Editor)
 	var space models.Space
-	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, parsedUserID).First(&space).Error == nil
-
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, parsedUserID).First(&space).Error == nil
 	var permission models.SpacePermission
-	// Busca se o cara tá na tabela de permissões com a tag "EDITOR"
-	isEditor := database.DB.Where("space_id = ? AND user_id = ? AND access_level = 'EDITOR'", spaceID, parsedUserID).First(&permission).Error == nil
+	isSpaceEditor := database.DB.Where("space_id = ? AND user_id = ? AND access_level = 'EDITOR'", parsedSpaceID, parsedUserID).First(&permission).Error == nil
 
-	// Se ele não for NENHUM dos dois, toma 403 na cara!
-	if !isOwner && !isEditor {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso Negado: Apenas o Dono ou Editores podem criar conteúdo."})
+	if !isOwner && !isSpaceEditor {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso Negado."})
 		return
 	}
 
-	// 3. Valida os dados enviados (o nome do caderno é obrigatório)
 	var input CreateNotebookInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
@@ -51,98 +79,80 @@ func CreateNotebook(c *gin.Context) {
 	}
 
 	if input.ColorHex == "" {
-		input.ColorHex = "#E0E0E0" // Cor padrão cinza claro
+		input.ColorHex = "#E0E0E0"
 	}
 
-	// 4. Converte a string da URL para UUID e monta o Caderno
-	parsedSpaceID, _ := uuid.Parse(spaceID)
 	newNotebook := models.Notebook{
-		SpaceID:  parsedSpaceID,
-		Name:     input.Name,
-		ColorHex: input.ColorHex,
+		SpaceID:     parsedSpaceID,
+		Name:        input.Name,
+		ColorHex:    input.ColorHex,
+		CreatedByID: parsedUserID, // ASSINATURA
+		UpdatedByID: parsedUserID, // ASSINATURA
 	}
 
-	// 5. Salva no banco de dados
 	if err := database.DB.Create(&newNotebook).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Caderno"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":  "Caderno criado com sucesso!",
-		"notebook": newNotebook,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Caderno criado!", "notebook": newNotebook})
 }
 
-// Exemplo de como deve ficar a sua função ListNotebooks (ou GetAll)
-func ListNotebooks(c *gin.Context) {
-	spaceID := c.Param("space_id")
-
-	// Pega o ID do usuário logado (Dono ou Convidado)
-	userIDContext, _ := c.Get("userID")
-	userIDStr := fmt.Sprintf("%v", userIDContext)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
-		return
-	}
-
-	// 1. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
-	// Verifica se o usuário é o DONO do Space OU se ele está na tabela de CONVIDADOS (SpacePermissions)
-	var space models.Space
-	var permission models.SpacePermission
-
-	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
-	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
-
-	// Se não for dono e não for convidado, BLOQUEIA!
-	if !isOwner && !isGuest {
-		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver este Space."})
-		return
-	}
-
-	// 2. BUSCA OS CADERNOS (Se passou da segurança, libera a leitura)
-	var notebooks []models.Notebook
-	if err := database.DB.Where("space_id = ?", spaceID).Find(&notebooks).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao carregar os cadernos", "detalhe": err.Error()})
-		return
-	}
-
-	c.JSON(200, gin.H{"notebooks": notebooks})
-}
-
-// DeleteNotebook - Apaga um caderno e tudo dentro dele
-func DeleteNotebook(c *gin.Context) {
-	notebookID := c.Param("notebook_id")
-	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "Caderno apagado com sucesso!"})
-}
-
+// ==========================================================
+// 2️⃣ UPDATE NOTEBOOK
+// ==========================================================
 type UpdateNotebookInput struct {
 	Name     string `json:"name"`
 	ColorHex string `json:"color_hex"`
 }
 
-// UpdateNotebook - Edita nome e cor do caderno
 func UpdateNotebook(c *gin.Context) {
-	notebookID := c.Param("notebook_id")
+	parsedUserID := getUserID(c)
+	notebookIDStr := c.Param("notebook_id")
+	parsedNotebookID, _ := uuid.Parse(notebookIDStr)
+
+	var notebook models.Notebook
+	if err := database.DB.Where("id = ?", parsedNotebookID).First(&notebook).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
+		return
+	}
+
+	if !canEditNotebook(notebook.SpaceID, parsedNotebookID, parsedUserID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para editar este caderno."})
+		return
+	}
+
 	var input UpdateNotebookInput
-
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos"})
 		return
 	}
 
-	if err := database.DB.Model(&models.Notebook{}).Where("id = ?", notebookID).Updates(models.Notebook{
-		Name:     input.Name,
-		ColorHex: input.ColorHex,
+	if err := database.DB.Model(&notebook).Updates(map[string]interface{}{
+		"name":          input.Name,
+		"color_hex":     input.ColorHex,
+		"updated_by_id": parsedUserID, // ASSINATURA
 	}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao atualizar caderno", "detalhe": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar"})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "Caderno atualizado!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Caderno atualizado!"})
+}
+
+func DeleteNotebook(c *gin.Context) {
+	notebookID := c.Param("notebook_id")
+	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Caderno apagado!"})
+}
+
+// ListNotebooks mantido provisoriamente para não quebrar a Fase 4
+func ListNotebooks(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	var notebooks []models.Notebook
+	database.DB.Where("space_id = ?", spaceID).Find(&notebooks)
+	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
 }

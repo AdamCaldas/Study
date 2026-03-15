@@ -56,11 +56,20 @@ type Space struct {
 	LastActivity time.Time `json:"last_activity"`
 }
 
-// SPACE PERMISSIONS (Amigos)
+// SPACE PERMISSIONS (Amigos - Permissão Geral do Space)
 type SpacePermission struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;primaryKey" json:"space_id"`
 	UserID      uuid.UUID `gorm:"type:uuid;primaryKey" json:"user_id"`
+	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // VIEWER, EDITOR
+	JoinedAt    time.Time `gorm:"autoCreateTime" json:"joined_at"`               // 👈 DATA QUE O AMIGO ENTROU!
+}
+
+// 🌟 NOVA TABELA: PERMISSÃO GRANULAR (Trava por Caderno)
+type NotebookPermission struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	NotebookID  uuid.UUID `gorm:"type:uuid;index" json:"notebook_id"`
+	UserID      uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
 	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // VIEWER, EDITOR
 }
 
@@ -71,6 +80,12 @@ type Notebook struct {
 	Name     string    `gorm:"size:100;not null" json:"name"`
 	ColorHex string    `gorm:"size:7" json:"color_hex"`
 	Pages    []Page    `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"`
+
+	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
+	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
+	CreatedAt   time.Time `json:"created_at"` // O GORM preenche sozinho
+	UpdatedAt   time.Time `json:"updated_at"` // O GORM atualiza sozinho
 }
 
 // PAGE (O Arquivo de Texto JSONB)
@@ -80,7 +95,12 @@ type Page struct {
 	Title      string    `gorm:"size:255;not null" json:"title"`
 	Content    string    `gorm:"type:jsonb" json:"content"`
 	Order      int       `json:"order"`
-	UpdatedAt  time.Time `json:"updated_at"`
+
+	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
+	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
+	CreatedAt   time.Time `json:"created_at"` // O GORM preenche sozinho
+	UpdatedAt   time.Time `json:"updated_at"` // O GORM atualiza sozinho
 }
 
 // QUICK NOTE
@@ -98,7 +118,7 @@ type StudyCycle struct {
 	ID          uuid.UUID        `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID        `gorm:"type:uuid;index" json:"space_id"`
 	CurrentStep int              `gorm:"default:0" json:"current_step"`
-	IsActive    bool             `gorm:"default:false" json:"is_active"` // 👈 COLOCA ESSA LINHA!
+	IsActive    bool             `gorm:"default:false" json:"is_active"`
 	Items       []StudyCycleItem `gorm:"foreignKey:CycleID;constraint:OnDelete:CASCADE" json:"items"`
 }
 
@@ -119,7 +139,7 @@ type StudyPlan struct {
 	EndTime    string    `json:"end_time"`
 	NotebookID uuid.UUID `gorm:"type:uuid" json:"notebook_id"`
 	Activity   string    `json:"activity"`
-	ColorHex   string    `gorm:"size:7;default:'#3B82F6'" json:"color_hex"` // 👈 E ESSA AQUI!
+	ColorHex   string    `gorm:"size:7;default:'#3B82F6'" json:"color_hex"`
 }
 
 // POMODORO SESSION

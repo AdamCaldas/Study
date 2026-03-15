@@ -11,7 +11,7 @@ import (
 	"studfy-backend/internal/notebook"
 	"studfy-backend/internal/space"
 	"studfy-backend/internal/study"
-	"studfy-backend/internal/users" // 👈 PACOTE NOVO IMPORTADO AQUI!
+	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-contrib/cors"
@@ -60,14 +60,14 @@ func main() {
 	protected.Use(auth.AuthMiddleware())
 	{
 		// ------------------------------------------------------
-		// 👤 1. USUÁRIO E PERFIL (Agora limpo e sem conflitos!)
+		// 👤 1. USUÁRIO E PERFIL
 		// ------------------------------------------------------
-		protected.GET("/me", users.GetMyProfile)       // 👈 Busca Perfil + Spaces Separados
-		protected.PUT("/me", users.UpdateMyProfile)    // 👈 Atualiza Nome e Idade
-		protected.DELETE("/me", users.DeleteMyAccount) // 👈 BOTÃO VERMELHO ADICIONADO AQUI!
+		protected.GET("/me", users.GetMyProfile)
+		protected.PUT("/me", users.UpdateMyProfile)
+		protected.DELETE("/me", users.DeleteMyAccount)
 
 		// ------------------------------------------------------
-		// 🎮 2. GAMIFICAÇÃO E FOCO (Pomodoro / Mood)
+		// 🎮 2. GAMIFICAÇÃO E FOCO
 		// ------------------------------------------------------
 		protected.POST("/gamification/reward", gamification.RewardXP)
 		protected.POST("/focus/pomodoro", focus.RegisterPomodoro)
@@ -83,16 +83,17 @@ func main() {
 		protected.POST("/spaces/join", space.RequestSpaceAccess)  // Solicitar acesso (Sala de Espera)
 
 		// ------------------------------------------------------
-		// 📊 4. DASHBOARD (Raio-X Completo do Space)
+		// 📊 4. SUPER DASHBOARD (O "Todas as Informações")
 		// ------------------------------------------------------
 		dashboardRoutes := protected.Group("/dashboard/:space_id")
 		dashboardRoutes.Use(auth.CheckSpaceAccess())
 		{
+			// Esta rota agora entrega TUDO! Não precisamos mais das rotas "GET" separadas.
 			dashboardRoutes.GET("", space.GetSpaceDashboard)
 		}
 
 		// ======================================================
-		// 🛠️ 5. GESTÃO INTERNA DO SPACE (Apenas quem tem acesso)
+		// 🛠️ 5. GESTÃO INTERNA DO SPACE E AÇÕES (CRUDs)
 		// ======================================================
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
@@ -104,51 +105,44 @@ func main() {
 			spaceRoutes.GET("/history", space.GetSpaceHistory) // Timeline de Atividades
 
 			// 👉 Gestão de Convites (Sala de Espera)
-			spaceRoutes.GET("/requests", space.ListSpaceRequests)                        // Dono vê quem pediu
-			spaceRoutes.POST("/requests/:request_id/respond", space.RespondSpaceRequest) // Dono aceita/rejeita
+			spaceRoutes.GET("/requests", space.ListSpaceRequests)
+			spaceRoutes.POST("/requests/:request_id/respond", space.RespondSpaceRequest)
 
-			// 👇 ROTAS NOVAS: Gestão de Membros Ativos 👇
-			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)    // Muda o cargo (VIEWER/EDITOR)
-			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator) // Expulsa do Space
+			// 👉 Gestão de Membros Ativos
+			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)
+			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator)
 
-			// 👉 Cadernos (Notebooks)
+			// 👉 Cadernos (Apenas Ações. O 'GET' foi apagado!)
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
-			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
 
-			// 👉 Notas Rápidas (Post-its)
+			// 👉 Notas Rápidas (Apenas Ações)
 			spaceRoutes.POST("/notes", space.CreateQuickNote)
-			spaceRoutes.GET("/notes", space.ListQuickNotes)
 			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
-			// 👉 Plano de Estudos (Agenda Semanal)
+			// 👉 Plano de Estudos (Apenas Ações)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
-			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
-			// 👉 Ciclos de Estudo (A Roleta)
+			// 👉 Ciclos de Estudo (Apenas Ações)
 			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
-			spaceRoutes.GET("/cycles", study.ListCycles)
-			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep) // Próxima matéria
-			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)   // Favoritar Ciclo
+			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
+			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
 
-			// 👉 Revisões e Quizzes
+			// 👉 Revisões e Quizzes (Apenas Ações)
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
-			spaceRoutes.GET("/quizzes", study.ListQuizzes)
 		}
 
 		// ------------------------------------------------------
-		// 📄 6. PÁGINAS (CRUD e Drag & Drop)
+		// 📄 6. PÁGINAS (Apenas Ações)
 		// ------------------------------------------------------
 		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
-		protected.GET("/notebooks/:notebook_id/pages", notebook.ListPages)
-		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages) // Nova!
-
+		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
 	}
@@ -157,10 +151,8 @@ func main() {
 	// ⚡ MODO DEUS (DASHBOARD ADMIN / DEV) ⚡
 	// ==========================================================
 	godMode := router.Group("/v1/admin")
-	// Usa DOIS seguranças: Tem que estar logado (Auth) E tem que ser DEV (AdminOnly)
 	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
 	{
-		// Relatório Geral
 		godMode.GET("/report", admin.GetPlatformReport)
 
 		godMode.GET("/users", admin.ListAllUsers)
@@ -177,9 +169,6 @@ func main() {
 		godMode.GET("/reports/moods", admin.GetMoodStats)
 	}
 
-	// ----------------------------------------------------------
-	// 🚀 INICIALIZAÇÃO DO SERVIDOR
-	// ----------------------------------------------------------
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
