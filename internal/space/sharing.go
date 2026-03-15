@@ -197,3 +197,58 @@ func ShareSpace(c *gin.Context) {
 		"share_code": space.ShareCode,
 	})
 }
+
+// ==========================================================
+// 5️⃣ Atualiza o nível de acesso do colaborador (VIEWER <-> EDITOR)
+// ==========================================================
+func UpdateCollaborator(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	userIDToUpdate := c.Param("user_id") // ID do amigo que vai ser atualizado
+
+	var input struct {
+		AccessLevel string `json:"access_level" binding:"required"` // Tem que mandar "VIEWER" ou "EDITOR"
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nível de acesso inválido"})
+		return
+	}
+
+	// Tenta atualizar. Se nenhuma linha for afetada, significa que o cara não é membro
+	result := database.DB.Model(&models.SpacePermission{}).
+		Where("space_id = ? AND user_id = ?", spaceID, userIDToUpdate).
+		Update("access_level", input.AccessLevel)
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar permissão"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Colaborador não encontrado neste Space"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Nível de acesso atualizado para " + input.AccessLevel})
+}
+
+// ==========================================================
+// 6️⃣ Expulsa o colaborador do Space
+// ==========================================================
+func RemoveCollaborator(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	userIDToRemove := c.Param("user_id") // ID do amigo que vai tomar o chute
+
+	// Deleta a permissão do banco
+	result := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userIDToRemove).Delete(&models.SpacePermission{})
+
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao expulsar usuário"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Usuário já não faz parte deste Space"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Usuário removido do Space com sucesso."})
+}

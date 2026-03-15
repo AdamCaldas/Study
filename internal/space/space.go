@@ -171,25 +171,34 @@ func DeleteSpace(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Space deletado com sucesso!"})
 }
 
-// GetSpaceByCode - Busca o Space pelo código de compartilhamento
+// GetSpaceByCode - Devolve o "Cartão de Visitas" antes do cara entrar
 func GetSpaceByCode(c *gin.Context) {
 	code := c.Param("code")
-	var space models.Space
 
-	if err := database.DB.Where("share_code = ?", code).First(&space).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Space inválido ou não encontrado"})
+	// Criamos uma estrutura sob medida (DTO) com tudo o que o Front-end precisa para desenhar a tela
+	var preview struct {
+		SpaceID        string `json:"space_id"`
+		Name           string `json:"name"`
+		ColorHex       string `json:"color_hex"`
+		OwnerName      string `json:"owner_name"`
+		TotalNotebooks int    `json:"total_notebooks"`
+		UpdatedAt      string `json:"updated_at"`
+	}
+
+	// Fazemos um JOIN para pegar o nome do dono e um Sub-Select para contar os cadernos de uma vez só!
+	err := database.DB.Table("spaces").
+		Select("spaces.id as space_id, spaces.name, spaces.color_hex, users.full_name as owner_name, spaces.updated_at, (SELECT COUNT(id) FROM notebooks WHERE space_id = spaces.id) as total_notebooks").
+		Joins("left join users on users.id = spaces.owner_id").
+		Where("spaces.share_code = ?", code).
+		Scan(&preview).Error
+
+	// Se não achou nada ou deu erro
+	if err != nil || preview.SpaceID == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado. Verifique o código."})
 		return
 	}
 
-	// Busca o nome do dono na tabela de Usuários
-	var owner models.User
-	database.DB.Select("full_name").Where("id = ?", space.OwnerID).First(&owner)
-
-	// Devolve o Space, a data de criação já vai junto nativamente, e agora o nome do dono também!
-	c.JSON(200, gin.H{
-		"space":      space,
-		"owner_name": owner.FullName,
-	})
+	c.JSON(http.StatusOK, preview)
 }
 
 type JoinSpaceInput struct {

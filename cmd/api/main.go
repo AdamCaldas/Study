@@ -106,6 +106,10 @@ func main() {
 			spaceRoutes.GET("/requests", space.ListSpaceRequests)                        // Dono vê quem pediu
 			spaceRoutes.POST("/requests/:request_id/respond", space.RespondSpaceRequest) // Dono aceita/rejeita
 
+			// 👇 ROTAS NOVAS: Gestão de Membros Ativos 👇
+			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)    // Muda o cargo (VIEWER/EDITOR)
+			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator) // Expulsa do Space
+
 			// 👉 Cadernos (Notebooks)
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.GET("/notebooks", notebook.ListNotebooks)
