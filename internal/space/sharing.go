@@ -14,8 +14,16 @@ import (
 // 1️⃣ Amigo solicita acesso pelo código
 // ==========================================================
 func RequestSpaceAccess(c *gin.Context) {
-	userID, _ := c.Get("userID") // ID do amigo que quer entrar
-	parsedUserID, _ := uuid.Parse(userID.(string))
+	userIDInterface, _ := c.Get("userID") // Pega o ID do amigo que quer entrar
+
+	var parsedUserID uuid.UUID
+	// 🛡️ Verifica de forma segura o tipo do dado para evitar "Panic" do Go
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v // Já vem pronto do seu AuthMiddleware!
+	case string:
+		parsedUserID, _ = uuid.Parse(v) // Plano B caso venha como texto
+	}
 
 	var input struct {
 		Code string `json:"code" binding:"required"`
