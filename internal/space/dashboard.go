@@ -20,6 +20,11 @@ func GetSpaceDashboard(c *gin.Context) {
 		return
 	}
 
+	// 🌟 1.5. BUSCA O DONO DO SPACE (A Mágica para o Front-end)
+	var owner models.User
+	// Usamos o Select para NÃO trazer a senha do dono, apenas o que o Front precisa!
+	database.DB.Select("id, full_name, email").Where("id = ?", space.OwnerID).First(&owner)
+
 	// 2. Colaboradores (Permissões completas de quem tá no Space)
 	var permissions []models.SpacePermission
 	database.DB.Where("space_id = ?", spaceID).Find(&permissions)
@@ -56,6 +61,7 @@ func GetSpaceDashboard(c *gin.Context) {
 	// 8. O JSON GIGANTE COM TUDO
 	c.JSON(http.StatusOK, gin.H{
 		"space":        space,
+		"owner":        owner, // 👈 ADICIONE ESTA LINHA AQUI!
 		"permissions":  permissions,
 		"notebooks":    notebooks, // 👈 Agora vai com todas as páginas e o JSONB dentro!
 		"all_cycles":   cycles,    // 👈 Vai com ativos e inativos!
