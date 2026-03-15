@@ -108,3 +108,50 @@ func ForceChangePassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Senha alterada com sucesso! O usuário já pode logar com a nova senha."})
 }
+
+// ==========================================================
+// 💀 O BOTÃO DO THANOS: Aniquila um usuário e TODO o seu império
+// ==========================================================
+func DeleteAnyUser(c *gin.Context) {
+	userID := c.Param("id")
+
+	// Inicia uma transação (Ou apaga tudo, ou não apaga nada)
+	tx := database.DB.Begin()
+
+	// 1. Remove ele de todos os Spaces onde ele era apenas convidado
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.SpacePermission{})
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.SpaceJoinRequest{})
+
+	// 2. Apaga TODOS os Spaces onde ele é o DONO
+	// (Como a gente configurou o OnDelete:CASCADE na model, o banco de dados
+	// vai apagar os Cadernos, Páginas, Ciclos e Quizzes dele automaticamente!)
+	tx.Unscoped().Where("owner_id = ?", userID).Delete(&models.Space{})
+
+	// 3. Apaga os rastros soltos (Pomodoros, Logs de Humor, Atividades e Pagamentos)
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.PomodoroSession{})
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.MoodCheckIn{})
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.ActivityLog{})
+	tx.Unscoped().Where("user_id = ?", userID).Delete(&models.PaymentHistory{})
+
+	// 4. O GOLPE FINAL: Deleta o Usuário do banco de dados real (Unscoped bypassa o soft delete)
+	result := tx.Unscoped().Where("id = ?", userID).Delete(&models.User{})
+
+	if result.Error != nil {
+		tx.Rollback() // Deu erro? Cancela a destruição pra não deixar o banco quebrado
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Falha na aniquilação: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Usuário fantasma! Ele não existe ou já foi de arrasta pra cima."})
+		return
+	}
+
+	// Confirma a destruição total!
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Usuário ANIQUILADO com sucesso! Foi de base, virou saudade e não sobrou nem poeira no banco de dados. 💀💥🧹",
+	})
+}

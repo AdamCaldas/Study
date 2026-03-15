@@ -158,6 +158,7 @@ func main() {
 		godMode.GET("/users", admin.ListAllUsers)
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
+		godMode.DELETE("/users/:id", admin.DeleteAnyUser)
 
 		godMode.GET("/spaces", admin.ListAllSpaces)
 		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)

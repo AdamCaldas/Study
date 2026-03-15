@@ -56,13 +56,34 @@ type Space struct {
 	LastActivity time.Time `json:"last_activity"`
 }
 
-// SPACE PERMISSIONS (Amigos - Permissão Geral do Space)
+// SPACE PERMISSIONS (Amigos - O Novo Sistema de Permissões Granulares)
 type SpacePermission struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;primaryKey" json:"space_id"`
 	UserID      uuid.UUID `gorm:"type:uuid;primaryKey" json:"user_id"`
-	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // VIEWER, EDITOR
-	JoinedAt    time.Time `gorm:"autoCreateTime" json:"joined_at"`               // 👈 DATA QUE O AMIGO ENTROU!
+	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // "CUSTOM", "VIEWER", "EDITOR"
+	JoinedAt    time.Time `gorm:"autoCreateTime" json:"joined_at"`
+
+	// 🟢 INFORMAÇÕES DO SPACE (Baseado na sua foto)
+	CanEditSpaceInfo  bool `gorm:"default:false" json:"can_edit_space_info"`  // Alterar nome e descrição
+	CanEditSpaceColor bool `gorm:"default:false" json:"can_edit_space_color"` // Mudar cor do space
+
+	// 🟠 GERENCIAMENTO DE CONTEÚDO (Baseado na sua foto)
+	CanCreateContent bool `gorm:"default:false" json:"can_create_content"` // Criar cadernos, notas
+	CanEditContent   bool `gorm:"default:false" json:"can_edit_content"`   // Modificar conteúdo existente
+	CanDeleteContent bool `gorm:"default:false" json:"can_delete_content"` // Remover cadernos, notas
+	CanManageTags    bool `gorm:"default:false" json:"can_manage_tags"`    // Criar e editar tags
+
+	// 🔵 PERMISSÕES AVANÇADAS (Baseado na sua foto)
+	CanManageMembers  bool `gorm:"default:false" json:"can_manage_members"`  // Adicionar, remover pessoas
+	CanSendInvites    bool `gorm:"default:false" json:"can_send_invites"`    // Enviar convites
+	CanSearchContent  bool `gorm:"default:true"  json:"can_search_content"`  // Buscar conteúdos (Geralmente true pra todos)
+	CanChangeSettings bool `gorm:"default:false" json:"can_change_settings"` // Alterar configurações gerais
+
+	// 🟣 EXTRAS STUD-FY (O bônus para deixar seu app incomparável)
+	CanManagePlans   bool `gorm:"default:false" json:"can_manage_plans"`   // Pode alterar a Agenda/Planos de Estudo
+	CanManageCycles  bool `gorm:"default:false" json:"can_manage_cycles"`  // Pode criar/editar Ciclos (A Roleta)
+	CanManageQuizzes bool `gorm:"default:false" json:"can_manage_quizzes"` // Pode criar e editar Simulados/Provas
 }
 
 // 🌟 NOVA TABELA: PERMISSÃO GRANULAR (Trava por Caderno)

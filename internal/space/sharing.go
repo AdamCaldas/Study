@@ -14,15 +14,14 @@ import (
 // 1️⃣ Amigo solicita acesso pelo código
 // ==========================================================
 func RequestSpaceAccess(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID") // Pega o ID do amigo que quer entrar
+	userIDInterface, _ := c.Get("userID")
 
 	var parsedUserID uuid.UUID
-	// 🛡️ Verifica de forma segura o tipo do dado para evitar "Panic" do Go
 	switch v := userIDInterface.(type) {
 	case uuid.UUID:
-		parsedUserID = v // Já vem pronto do seu AuthMiddleware!
+		parsedUserID = v
 	case string:
-		parsedUserID, _ = uuid.Parse(v) // Plano B caso venha como texto
+		parsedUserID, _ = uuid.Parse(v)
 	}
 
 	var input struct {
@@ -33,34 +32,29 @@ func RequestSpaceAccess(c *gin.Context) {
 		return
 	}
 
-	// 1. Busca o Space pelo código
 	var space models.Space
 	if err := database.DB.Where("share_code = ?", input.Code).First(&space).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Código de Space inválido"})
 		return
 	}
 
-	// 2. Verifica se o dono não está tentando pedir acesso pro próprio space
 	if space.OwnerID == parsedUserID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Você já é o dono deste Space!"})
 		return
 	}
 
-	// 3. Verifica se o usuário já é um colaborador aprovado
 	var existingPermission models.SpacePermission
 	if err := database.DB.Where("space_id = ? AND user_id = ?", space.ID, parsedUserID).First(&existingPermission).Error; err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Você já faz parte deste Space!"})
 		return
 	}
 
-	// 4. Verifica se já existe uma solicitação pendente na Sala de Espera
 	var existingRequest models.SpaceJoinRequest
 	if err := database.DB.Where("space_id = ? AND user_id = ? AND status = 'pending'", space.ID, parsedUserID).First(&existingRequest).Error; err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Você já enviou uma solicitação. Aguarde o dono aprovar!"})
 		return
 	}
 
-	// 5. Cria a solicitação pendente
 	newRequest := models.SpaceJoinRequest{
 		SpaceID: space.ID,
 		UserID:  parsedUserID,
@@ -80,7 +74,6 @@ func RequestSpaceAccess(c *gin.Context) {
 func ListSpaceRequests(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Traz as solicitações e faz JOIN com users para o dono ver o nome de quem pediu
 	var requests []struct {
 		RequestID string `json:"request_id"`
 		UserID    string `json:"user_id"`
@@ -95,7 +88,6 @@ func ListSpaceRequests(c *gin.Context) {
 		Scan(&requests).Error
 
 	if err != nil || len(requests) == 0 {
-		// Retorna array vazio em vez de null para o Front-end não quebrar
 		c.JSON(http.StatusOK, []interface{}{})
 		return
 	}
@@ -111,8 +103,8 @@ func RespondSpaceRequest(c *gin.Context) {
 	requestID := c.Param("request_id")
 
 	var input struct {
-		Action      string `json:"action" binding:"required"` // "accept" ou "reject"
-		AccessLevel string `json:"access_level"`              // "VIEWER" ou "EDITOR" (Seu padrão!)
+		Action      string `json:"action" binding:"required"`
+		AccessLevel string `json:"access_level"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -120,31 +112,26 @@ func RespondSpaceRequest(c *gin.Context) {
 		return
 	}
 
-	// Busca a solicitação no banco
 	var joinRequest models.SpaceJoinRequest
 	if err := database.DB.Where("id = ? AND space_id = ?", requestID, spaceID).First(&joinRequest).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Solicitação não encontrada"})
 		return
 	}
 
-	// Inicia transação segura
 	tx := database.DB.Begin()
 
 	// 🟢 SE O DONO ACEITAR
 	if input.Action == "accept" {
-		// Atualiza o status do pedido para aprovado
 		if err := tx.Model(&joinRequest).Update("status", "approved").Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao aprovar solicitação"})
 			return
 		}
 
-		// Valida o AccessLevel (Se não mandar nada ou mandar errado, vira VIEWER por segurança)
 		if input.AccessLevel != "EDITOR" {
 			input.AccessLevel = "VIEWER"
 		}
 
-		// Cria a permissão oficial na tabela SpacePermission
 		permission := models.SpacePermission{
 			SpaceID:     joinRequest.SpaceID,
 			UserID:      joinRequest.UserID,
@@ -174,7 +161,6 @@ func RespondSpaceRequest(c *gin.Context) {
 		return
 	}
 
-	// Se mandar uma action bizarra que não é accept nem reject
 	c.JSON(http.StatusBadRequest, gin.H{"error": "A 'action' deve ser obrigatoriamente 'accept' ou 'reject'"})
 }
 
@@ -184,14 +170,12 @@ func RespondSpaceRequest(c *gin.Context) {
 func ShareSpace(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Busca o Space no banco de dados
 	var space models.Space
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
 		return
 	}
 
-	// Devolve o código de compartilhamento para o Front-end mostrar na tela
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Código de compartilhamento recuperado!",
 		"share_code": space.ShareCode,
@@ -199,25 +183,52 @@ func ShareSpace(c *gin.Context) {
 }
 
 // ==========================================================
-// 5️⃣ Atualiza o nível de acesso do colaborador (VIEWER <-> EDITOR)
+// 5️⃣ Atualiza Nível de Acesso + Checkboxes Granulares (A sua Tela!)
 // ==========================================================
 func UpdateCollaborator(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	userIDToUpdate := c.Param("user_id") // ID do amigo que vai ser atualizado
+	userIDToUpdate := c.Param("user_id")
 
 	var input struct {
-		AccessLevel string `json:"access_level" binding:"required"` // Tem que mandar "VIEWER" ou "EDITOR"
+		AccessLevel       string `json:"access_level" binding:"required"` // "VIEWER", "EDITOR" ou "CUSTOM"
+		CanEditSpaceInfo  bool   `json:"can_edit_space_info"`
+		CanEditSpaceColor bool   `json:"can_edit_space_color"`
+		CanCreateContent  bool   `json:"can_create_content"`
+		CanEditContent    bool   `json:"can_edit_content"`
+		CanDeleteContent  bool   `json:"can_delete_content"`
+		CanManageTags     bool   `json:"can_manage_tags"`
+		CanManageMembers  bool   `json:"can_manage_members"`
+		CanSendInvites    bool   `json:"can_send_invites"`
+		CanSearchContent  bool   `json:"can_search_content"`
+		CanChangeSettings bool   `json:"can_change_settings"`
+		CanManagePlans    bool   `json:"can_manage_plans"`
+		CanManageCycles   bool   `json:"can_manage_cycles"`
+		CanManageQuizzes  bool   `json:"can_manage_quizzes"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Nível de acesso inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados de permissão inválidos"})
 		return
 	}
 
-	// Tenta atualizar. Se nenhuma linha for afetada, significa que o cara não é membro
 	result := database.DB.Model(&models.SpacePermission{}).
 		Where("space_id = ? AND user_id = ?", spaceID, userIDToUpdate).
-		Update("access_level", input.AccessLevel)
+		Updates(map[string]interface{}{
+			"access_level":         input.AccessLevel,
+			"can_edit_space_info":  input.CanEditSpaceInfo,
+			"can_edit_space_color": input.CanEditSpaceColor,
+			"can_create_content":   input.CanCreateContent,
+			"can_edit_content":     input.CanEditContent,
+			"can_delete_content":   input.CanDeleteContent,
+			"can_manage_tags":      input.CanManageTags,
+			"can_manage_members":   input.CanManageMembers,
+			"can_send_invites":     input.CanSendInvites,
+			"can_search_content":   input.CanSearchContent,
+			"can_change_settings":  input.CanChangeSettings,
+			"can_manage_plans":     input.CanManagePlans,
+			"can_manage_cycles":    input.CanManageCycles,
+			"can_manage_quizzes":   input.CanManageQuizzes,
+		})
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar permissão"})
@@ -228,7 +239,7 @@ func UpdateCollaborator(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Nível de acesso atualizado para " + input.AccessLevel})
+	c.JSON(http.StatusOK, gin.H{"message": "Permissões atualizadas com sucesso para " + input.AccessLevel})
 }
 
 // ==========================================================
@@ -236,9 +247,8 @@ func UpdateCollaborator(c *gin.Context) {
 // ==========================================================
 func RemoveCollaborator(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	userIDToRemove := c.Param("user_id") // ID do amigo que vai tomar o chute
+	userIDToRemove := c.Param("user_id")
 
-	// Deleta a permissão do banco
 	result := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userIDToRemove).Delete(&models.SpacePermission{})
 
 	if result.Error != nil {
