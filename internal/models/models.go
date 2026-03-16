@@ -134,21 +134,41 @@ type QuickNote struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// STUDY CYCLE
+// ==========================================================
+// STUDY CYCLE (A Roleta Inteligente)
+// ==========================================================
 type StudyCycle struct {
-	ID          uuid.UUID        `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID     uuid.UUID        `gorm:"type:uuid;index" json:"space_id"`
-	CurrentStep int              `gorm:"default:0" json:"current_step"`
-	IsActive    bool             `gorm:"default:false" json:"is_active"`
-	Items       []StudyCycleItem `gorm:"foreignKey:CycleID;constraint:OnDelete:CASCADE" json:"items"`
+	ID            uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID       uuid.UUID  `gorm:"type:uuid;index" json:"space_id"`
+	Name          string     `gorm:"size:255;not null" json:"name"`
+	Description   string     `json:"description"`
+	TargetGoal    string     `gorm:"size:255" json:"target_goal"`
+	TargetDate    *time.Time `json:"target_date"`                                   // Ponteiro para permitir nulo
+	CycleType     string     `gorm:"size:50;default:'automatic'" json:"cycle_type"` // automatic | manual
+	Visibility    string     `gorm:"size:50;default:'private'" json:"visibility"`   // public | private
+	HoursPerDay   float64    `json:"hours_per_day"`
+	AvailableDays string     `gorm:"type:jsonb" json:"available_days"` // Array de dias salvo como JSONB
+	MinSessionMin int        `gorm:"default:30" json:"min_session_minutes"`
+	MaxSessionMin int        `gorm:"default:90" json:"max_session_minutes"`
+	CurrentStep   int        `gorm:"default:0" json:"current_step"`
+	IsActive      bool       `gorm:"default:false" json:"is_active"`
+
+	Items []StudyCycleItem `gorm:"foreignKey:CycleID;constraint:OnDelete:CASCADE" json:"items"`
+
+	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type StudyCycleItem struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	CycleID     uuid.UUID `gorm:"type:uuid;index" json:"cycle_id"`
-	NotebookID  uuid.UUID `gorm:"type:uuid" json:"notebook_id"`
-	Sequence    int       `json:"sequence"`
-	DurationMin int       `json:"duration_min"`
+	ID               uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	CycleID          uuid.UUID  `gorm:"type:uuid;index" json:"cycle_id"`
+	NotebookID       *uuid.UUID `gorm:"type:uuid" json:"notebook_id"` // Ponteiro, pois pode vir vazio (null) do Front
+	Name             string     `gorm:"-" json:"name"`                // Campo Virtual (não salva no DB) para o Front mandar o nome
+	Sequence         int        `json:"sequence"`
+	Importance       int        `gorm:"type:int2;default:3" json:"importance"`
+	Performance      int        `gorm:"type:int2;default:3" json:"performance"`
+	SuggestedMinutes int        `json:"suggested_minutes"` // Tempo calculado pelo Algoritmo
 }
 
 // STUDY PLAN
