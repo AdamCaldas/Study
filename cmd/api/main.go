@@ -132,6 +132,7 @@ func main() {
 			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
 			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
+			spaceRoutes.POST("/cycles/simulate", study.SimulateStudyCycle)
 
 			// 👉 Revisões e Quizzes (Apenas Ações)
 			spaceRoutes.POST("/reviews", study.CreateReview)

@@ -1,8 +1,12 @@
 package study
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"time"
+
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -10,190 +14,293 @@ import (
 	"github.com/google/uuid"
 )
 
-// Estruturas para receber os dados do Frontend
-type CreateCycleItemInput struct {
-	NotebookID  uuid.UUID `json:"notebook_id" binding:"required"`
-	Sequence    int       `json:"sequence" binding:"required"`
-	DurationMin int       `json:"duration_min" binding:"required"`
+// ==========================================================
+// ESTRUTURAS DE ENTRADA (O JSON que o Front-end vai mandar)
+// ==========================================================
+type CycleDisciplineInput struct {
+	NotebookID  *string `json:"notebook_id"`
+	Name        string  `json:"name"`
+	Importance  int     `json:"importance"`
+	Performance int     `json:"performance"`
+	Order       int     `json:"order"`
 }
 
-type CreateStudyCycleInput struct {
-	Items []CreateCycleItemInput `json:"items" binding:"required"`
+type CycleConfigInput struct {
+	HoursPerDay       float64  `json:"hours_per_day"`
+	AvailableDays     []string `json:"available_days"`
+	MinSessionMinutes int      `json:"min_session_minutes"`
+	MaxSessionMinutes int      `json:"max_session_minutes"`
 }
 
-func CreateStudyCycle(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	spaceID := c.Param("space_id")
+type CreateCycleRequest struct {
+	Name           string                 `json:"name" binding:"required"`
+	Description    string                 `json:"description"`
+	TargetGoal     string                 `json:"target_goal"`
+	TargetDate     *time.Time             `json:"target_date"`
+	CycleType      string                 `json:"cycle_type"`
+	Visibility     string                 `json:"visibility"`
+	Disciplines    []CycleDisciplineInput `json:"disciplines" binding:"required"`
+	ScheduleConfig CycleConfigInput       `json:"schedule_config" binding:"required"`
+}
 
-	// 1. Valida se o utilizador tem acesso ao Space
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
-		return
+// ==========================================================
+// ⚙️ ALGORITMO CORE: Distribuição de Tempo
+// ==========================================================
+func calculateCycleDistribution(disciplines []CycleDisciplineInput, totalDailyHours float64, minSess int, maxSess int) []models.StudyCycleItem {
+	var totalWeight float64 = 0
+	var calculatedItems []models.StudyCycleItem
+
+	// 1. Calcula os pesos: W = I + (6 - P)
+	weights := make([]float64, len(disciplines))
+	for i, disc := range disciplines {
+		w := float64(disc.Importance + (6 - disc.Performance))
+		weights[i] = w
+		totalWeight += w
 	}
 
-	// 2. Valida o JSON enviado
-	var input CreateStudyCycleInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	totalDailyMinutes := totalDailyHours * 60
+
+	// 2. Distribui os minutos baseados na proporção
+	for i, disc := range disciplines {
+		proportion := weights[i] / totalWeight
+		suggestedMin := int(math.Round(proportion * totalDailyMinutes))
+
+		// 3. Trava de Segurança (Min e Max)
+		if suggestedMin < minSess {
+			suggestedMin = minSess
+		}
+
+		// Se o tempo sugerido for maior que a sessão máxima, dividimos em blocos!
+		blocksNeeded := 1
+		if suggestedMin > maxSess {
+			blocksNeeded = int(math.Ceil(float64(suggestedMin) / float64(maxSess)))
+			suggestedMin = suggestedMin / blocksNeeded // Divide o tempo pelo número de blocos
+		}
+
+		// Adiciona as matérias (se precisar dividir, cria blocos duplicados na roleta)
+		for b := 0; b < blocksNeeded; b++ {
+			var nbID *uuid.UUID
+			if disc.NotebookID != nil && *disc.NotebookID != "" {
+				parsed, _ := uuid.Parse(*disc.NotebookID)
+				nbID = &parsed
+			}
+
+			calculatedItems = append(calculatedItems, models.StudyCycleItem{
+				NotebookID:       nbID,
+				Name:             disc.Name, // Usado para criar o caderno depois, se nbID for nulo
+				Importance:       disc.Importance,
+				Performance:      disc.Performance,
+				Sequence:         disc.Order + b, // Ajusta a ordem se houver quebra de bloco
+				SuggestedMinutes: suggestedMin,
+			})
+		}
+	}
+
+	return calculatedItems
+}
+
+// ==========================================================
+// 🧪 ROTA 1: SIMULAR CICLO (O Preview para o usuário)
+// ==========================================================
+func SimulateStudyCycle(c *gin.Context) {
+	var req CreateCycleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
 		return
 	}
 
-	parsedSpaceID, _ := uuid.Parse(spaceID)
+	// Executa a Matemática
+	items := calculateCycleDistribution(req.Disciplines, req.ScheduleConfig.HoursPerDay, req.ScheduleConfig.MinSessionMinutes, req.ScheduleConfig.MaxSessionMinutes)
 
-	// 3. Cria o Ciclo Principal (Inicia no passo 0)
-	newCycle := models.StudyCycle{
-		SpaceID:     parsedSpaceID,
-		CurrentStep: 0,
+	// Calcula os Totais de Estudo
+	daysCount := len(req.ScheduleConfig.AvailableDays)
+	weeklyHours := req.ScheduleConfig.HoursPerDay * float64(daysCount)
+	monthlyHours := weeklyHours * 4.3 // Média de semanas num mês
+
+	// Formatação amigável para o Front
+	totalDailyStr := formatHours(req.ScheduleConfig.HoursPerDay)
+
+	c.JSON(http.StatusOK, gin.H{
+		"totals": gin.H{
+			"daily":   totalDailyStr,
+			"weekly":  formatHours(weeklyHours),
+			"monthly": formatHours(monthlyHours),
+		},
+		"distribution": items,
+	})
+}
+
+// Função auxiliar consertada! Formata float para string bonita (ex: "4h 30min")
+func formatHours(h float64) string {
+	hours := int(math.Floor(h))
+	minutes := int(math.Round((h - float64(hours)) * 60))
+	if minutes == 0 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	return fmt.Sprintf("%dh %dmin", hours, minutes)
+}
+
+// ==========================================================
+// 💾 ROTA 2: CRIAR O CICLO REAL (Salva no Banco + Auto-Cria Cadernos)
+// ==========================================================
+func CreateStudyCycle(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+	spaceID, _ := uuid.Parse(spaceIDStr)
+
+	// Pega o ID do criador de forma segura
+	userIDInterface, _ := c.Get("userID")
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
 	}
 
-	// O GORM permite iniciar uma transação. Se algo falhar, ele reverte tudo.
-	tx := database.DB.Begin()
-
-	if err := tx.Create(&newCycle).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar o ciclo de estudos"})
+	var req CreateCycleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	// 4. Cria os itens (disciplinas) dentro do ciclo
-	for _, itemInput := range input.Items {
-		newItem := models.StudyCycleItem{
-			CycleID:     newCycle.ID,
-			NotebookID:  itemInput.NotebookID,
-			Sequence:    itemInput.Sequence,
-			DurationMin: itemInput.DurationMin,
-		}
-		if err := tx.Create(&newItem).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao adicionar itens ao ciclo"})
-			return
+	// 1. Validação de Metas
+	if req.TargetGoal != "" && req.TargetDate == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Se uma meta foi definida, a data alvo (target_date) é obrigatória."})
+		return
+	}
+	if req.TargetDate != nil && req.TargetDate.Before(time.Now()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "A data alvo não pode estar no passado."})
+		return
+	}
+
+	// 2. Calcula os tempos (Automático)
+	var itemsToSave []models.StudyCycleItem
+
+	if req.CycleType == "automatic" {
+		itemsToSave = calculateCycleDistribution(req.Disciplines, req.ScheduleConfig.HoursPerDay, req.ScheduleConfig.MinSessionMinutes, req.ScheduleConfig.MaxSessionMinutes)
+	} else {
+		// Modo Manual (Aceita os tempos que o front mandou)
+		// ... lógica manual entra aqui depois
+	}
+
+	// Inicia Transação Segura
+	tx := database.DB.Begin()
+
+	// 3. Lookup & Create de Cadernos
+	for i, item := range itemsToSave {
+		if item.NotebookID == nil {
+			// Cria um novo automaticamente!
+			newNb := models.Notebook{
+				SpaceID:     spaceID,
+				Name:        item.Name,
+				ColorHex:    "#8B5CF6", // Roxo Padrão
+				CreatedByID: userID,
+				UpdatedByID: userID,
+			}
+			if err := tx.Create(&newNb).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar caderno automático: " + item.Name})
+				return
+			}
+			// Associa o ID novo à roleta
+			itemsToSave[i].NotebookID = &newNb.ID
 		}
 	}
 
-	// Confirma a transação
+	// Transforma array de dias em JSON String
+	availableDaysJSON, _ := json.Marshal(req.ScheduleConfig.AvailableDays)
+
+	// 4. Salva o Cabeçalho do Ciclo
+	newCycle := models.StudyCycle{
+		SpaceID:       spaceID,
+		Name:          req.Name,
+		Description:   req.Description,
+		TargetGoal:    req.TargetGoal,
+		TargetDate:    req.TargetDate,
+		CycleType:     req.CycleType,
+		Visibility:    req.Visibility,
+		HoursPerDay:   req.ScheduleConfig.HoursPerDay,
+		AvailableDays: string(availableDaysJSON),
+		MinSessionMin: req.ScheduleConfig.MinSessionMinutes,
+		MaxSessionMin: req.ScheduleConfig.MaxSessionMinutes,
+		CreatedByID:   userID,
+		Items:         itemsToSave,
+	}
+
+	if err := tx.Create(&newCycle).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o Ciclo de Estudos."})
+		return
+	}
+
 	tx.Commit()
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Ciclo de estudos criado com sucesso!",
+		"message": "Ciclo criado com sucesso!",
 		"cycle":   newCycle,
 	})
 }
 
-// ListCycles - Lista os ciclos de estudo (roleta) do Space
-func ListCycles(c *gin.Context) {
-	spaceID := c.Param("space_id")
-
-	// 1. Pega o ID do usuário logado
-	userIDContext, _ := c.Get("userID")
-	userIDStr := fmt.Sprintf("%v", userIDContext)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
-		return
-	}
-
-	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
-	var space models.Space
-	var permission models.SpacePermission
-
-	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
-	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
-
-	// Se não for dono e não for convidado, BLOQUEIA!
-	if !isOwner && !isGuest {
-		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver os Ciclos deste Space."})
-		return
-	}
-
-	// 3. BUSCA OS CICLOS (Com os itens embutidos usando Preload)
-	var cycles []models.StudyCycle
-	if err := database.DB.Preload("Items").Where("space_id = ?", spaceID).Find(&cycles).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao carregar os ciclos", "detalhe": err.Error()})
-		return
-	}
-
-	// Devolve os ciclos para o Front-end
-	c.JSON(200, gin.H{"cycles": cycles})
-}
-
-// AdvanceCycleStep move o ponteiro do ciclo para a próxima matéria usando matemática modular
+// ==========================================================
+// 🔄 AVANÇAR O PASSO DA ROLETA
+// ==========================================================
 func AdvanceCycleStep(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	spaceID := c.Param("space_id")
-	cycleID := c.Param("cycle_id") // Precisamos saber qual ciclo avançar
-
-	// 1. Segurança: valida se o usuário tem acesso ao Space
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado"})
-		return
-	}
-
-	// 2. Busca o ciclo no banco e JÁ CARREGA as matérias dele (Preload)
+	cycleID := c.Param("cycle_id")
 	var cycle models.StudyCycle
-	if err := database.DB.Preload("Items").Where("id = ? AND space_id = ?", cycleID, spaceID).First(&cycle).Error; err != nil {
+
+	// Busca o ciclo e já traz as matérias para sabermos o tamanho da roleta
+	if err := database.DB.Preload("Items").Where("id = ?", cycleID).First(&cycle).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Ciclo não encontrado"})
 		return
 	}
 
 	totalItems := len(cycle.Items)
-	if totalItems == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Este ciclo não tem nenhuma matéria para estudar."})
-		return
-	}
-
-	// 3. A Mágica do Operador Módulo (%)
-	// Se totalItems = 3 (0, 1 e 2). E o CurrentStep atual é 2.
-	// (2 + 1) = 3. E 3 % 3 = 0. Ele volta pro começo perfeitamente!
-	cycle.CurrentStep = (cycle.CurrentStep + 1) % totalItems
-
-	// 4. Salva o novo passo no banco de dados
-	if err := database.DB.Save(&cycle).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar o ciclo"})
-		return
+	if totalItems > 0 {
+		// Avança um passo. O módulo (%) faz a roleta voltar pro 0 quando chega no fim!
+		cycle.CurrentStep = (cycle.CurrentStep + 1) % totalItems
+		database.DB.Save(&cycle)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":      "Ciclo avançado com sucesso!",
+		"message":      "Roleta girou para a próxima matéria!",
 		"current_step": cycle.CurrentStep,
 	})
 }
 
-func DeleteStudyCycle(c *gin.Context) {
-	cycleID := c.Param("cycle_id")
-	// Como colocamos "Cascade Delete" no banco, ao apagar o ciclo, as matérias dele somem juntas automaticamente!
-	if err := database.DB.Where("id = ?", cycleID).Delete(&models.StudyCycle{}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao apagar ciclo", "detalhe": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "Ciclo apagado com sucesso!"})
-}
-
-// ActivateCycle - Define um ciclo como o ativo/favorito do Space
+// ==========================================================
+// ⭐ ATIVAR CICLO (Favoritar a Roleta Atual)
+// ==========================================================
 func ActivateCycle(c *gin.Context) {
-	spaceID := c.Param("space_id")
 	cycleID := c.Param("cycle_id")
+	spaceID := c.Param("space_id")
 
-	// Inicia uma transação no banco
 	tx := database.DB.Begin()
 
-	// 1. Desativa TODOS os ciclos que pertencem a este Space
-	if err := tx.Model(&models.StudyCycle{}).Where("space_id = ?", spaceID).Update("is_active", false).Error; err != nil {
+	// 1. Desativa todos os ciclos deste Space (Só pode ter um ativo por vez)
+	tx.Model(&models.StudyCycle{}).Where("space_id = ?", spaceID).Update("is_active", false)
+
+	// 2. Ativa apenas o ciclo que o usuário escolheu
+	if err := tx.Model(&models.StudyCycle{}).Where("id = ?", cycleID).Update("is_active", true).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao redefinir os ciclos ativos"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao ativar o ciclo"})
 		return
 	}
 
-	// 2. Ativa APENAS o ciclo que o usuário clicou
-	if err := tx.Model(&models.StudyCycle{}).Where("id = ? AND space_id = ?", cycleID, spaceID).Update("is_active", true).Error; err != nil {
-		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao ativar o ciclo escolhido"})
-		return
-	}
-
-	// Salva as alterações
 	tx.Commit()
+	c.JSON(http.StatusOK, gin.H{"message": "Ciclo ativado! Agora ele é a roleta principal do Space."})
+}
 
-	c.JSON(200, gin.H{"message": "Ciclo definido como ativo com sucesso!"})
+// ==========================================================
+// 🗑️ DELETAR CICLO
+// ==========================================================
+func DeleteStudyCycle(c *gin.Context) {
+	cycleID := c.Param("cycle_id")
+
+	// O GORM vai apagar em cascata os items desse ciclo também
+	if err := database.DB.Where("id = ?", cycleID).Delete(&models.StudyCycle{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deletar o ciclo"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Ciclo deletado com sucesso!"})
 }
