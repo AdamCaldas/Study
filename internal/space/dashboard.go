@@ -24,28 +24,62 @@ func GetSpaceDashboard(c *gin.Context) {
 	var owner models.User
 	database.DB.Select("id, full_name, email, profile_pic").Where("id = ?", space.OwnerID).First(&owner)
 
-	// 🌟 3. BUSCA OS COLABORADORES (Permissão Geral do Space)
+	// 🌟 3. BUSCA OS COLABORADORES (Agora com TODAS as permissões granulares!)
 	var collaborators []struct {
-		UserID      string `json:"user_id"`
-		FullName    string `json:"full_name"`
-		Email       string `json:"email"`
-		ProfilePic  string `json:"profile_picture_url"`
-		AccessLevel string `json:"access_level"`
+		UserID            string `json:"user_id"`
+		FullName          string `json:"full_name"`
+		Email             string `json:"email"`
+		ProfilePic        string `json:"profile_picture_url"`
+		AccessLevel       string `json:"access_level"`
+		CanEditSpaceInfo  bool   `json:"can_edit_space_info"`
+		CanEditSpaceColor bool   `json:"can_edit_space_color"`
+		CanCreateContent  bool   `json:"can_create_content"`
+		CanEditContent    bool   `json:"can_edit_content"`
+		CanDeleteContent  bool   `json:"can_delete_content"`
+		CanManageTags     bool   `json:"can_manage_tags"`
+		CanManageMembers  bool   `json:"can_manage_members"`
+		CanSendInvites    bool   `json:"can_send_invites"`
+		CanSearchContent  bool   `json:"can_search_content"`
+		CanChangeSettings bool   `json:"can_change_settings"`
+		CanManagePlans    bool   `json:"can_manage_plans"`
+		CanManageCycles   bool   `json:"can_manage_cycles"`
+		CanManageQuizzes  bool   `json:"can_manage_quizzes"`
 	}
 
 	database.DB.Table("space_permissions").
-		Select("users.id as user_id, users.full_name, users.email, users.profile_pic, space_permissions.access_level").
+		Select(`users.id as user_id, users.full_name, users.email, users.profile_pic, 
+			space_permissions.access_level, space_permissions.can_edit_space_info, 
+			space_permissions.can_edit_space_color, space_permissions.can_create_content, 
+			space_permissions.can_edit_content, space_permissions.can_delete_content, 
+			space_permissions.can_manage_tags, space_permissions.can_manage_members, 
+			space_permissions.can_send_invites, space_permissions.can_search_content, 
+			space_permissions.can_change_settings, space_permissions.can_manage_plans, 
+			space_permissions.can_manage_cycles, space_permissions.can_manage_quizzes`).
 		Joins("join users on users.id = space_permissions.user_id").
 		Where("space_permissions.space_id = ?", spaceID).
 		Scan(&collaborators)
 
 	if collaborators == nil {
+		// Mantém o array vazio para o Front não quebrar
 		collaborators = []struct {
-			UserID      string `json:"user_id"`
-			FullName    string `json:"full_name"`
-			Email       string `json:"email"`
-			ProfilePic  string `json:"profile_picture_url"`
-			AccessLevel string `json:"access_level"`
+			UserID            string `json:"user_id"`
+			FullName          string `json:"full_name"`
+			Email             string `json:"email"`
+			ProfilePic        string `json:"profile_picture_url"`
+			AccessLevel       string `json:"access_level"`
+			CanEditSpaceInfo  bool   `json:"can_edit_space_info"`
+			CanEditSpaceColor bool   `json:"can_edit_space_color"`
+			CanCreateContent  bool   `json:"can_create_content"`
+			CanEditContent    bool   `json:"can_edit_content"`
+			CanDeleteContent  bool   `json:"can_delete_content"`
+			CanManageTags     bool   `json:"can_manage_tags"`
+			CanManageMembers  bool   `json:"can_manage_members"`
+			CanSendInvites    bool   `json:"can_send_invites"`
+			CanSearchContent  bool   `json:"can_search_content"`
+			CanChangeSettings bool   `json:"can_change_settings"`
+			CanManagePlans    bool   `json:"can_manage_plans"`
+			CanManageCycles   bool   `json:"can_manage_cycles"`
+			CanManageQuizzes  bool   `json:"can_manage_quizzes"`
 		}{}
 	}
 
