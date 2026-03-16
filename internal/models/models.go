@@ -140,7 +140,7 @@ type QuickNote struct {
 type StudyCycle struct {
 	ID            uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID       uuid.UUID  `gorm:"type:uuid;index" json:"space_id"`
-	Name          string     `gorm:"size:255;not null" json:"name"`
+	Name          string     `gorm:"size:255;not null;default:'Meu Ciclo'" json:"name"`
 	Description   string     `json:"description"`
 	TargetGoal    string     `gorm:"size:255" json:"target_goal"`
 	TargetDate    *time.Time `json:"target_date"`                                   // Ponteiro para permitir nulo
