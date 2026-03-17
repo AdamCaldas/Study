@@ -104,14 +104,22 @@ func DeleteNotification(c *gin.Context) {
 // ==========================================================
 func GetMyNotifications(c *gin.Context) {
 	userIDInterface, _ := c.Get("userID")
-	userID := userIDInterface.(string)
+	var userID string
+
+	// 🛡️ Trava de segurança: Descobre se o ID veio como UUID ou String e converte certo
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v.String()
+	case string:
+		userID = v
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação interno"})
+		return
+	}
 
 	var notifications []models.Notification
 
-	// A Query super otimizada:
-	// 1. Busca avisos Globais OU direcionados ao ID do usuário
-	// 2. Garante que está ativo e não expirou
-	// 3. (Futuro: Aqui você adiciona a lógica de cruzar com o ID dos Spaces dele)
+	// A Query super otimizada
 	database.DB.Raw(`
 		SELECT n.* FROM notifications n
 		LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
@@ -124,6 +132,10 @@ func GetMyNotifications(c *gin.Context) {
 		)
 		ORDER BY n.created_at DESC
 	`, userID, `"`+userID+`"`).Scan(&notifications)
+
+	if notifications == nil {
+		notifications = []models.Notification{} // Para não devolver null pro Front-end
+	}
 
 	c.JSON(http.StatusOK, gin.H{"notifications": notifications})
 }
