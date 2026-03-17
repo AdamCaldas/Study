@@ -64,6 +64,8 @@ func ConnectDB() {
 		&models.Quiz{},
 		&models.QuizQuestion{},
 		&models.SpaceJoinRequest{},
+		&models.Notification{},     // 👈 ADICIONE ESSA!
+		&models.NotificationRead{}, // 👈 E ADICIONE ESSA!
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)

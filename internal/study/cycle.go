@@ -23,7 +23,7 @@ type CycleDisciplineInput struct {
 	Importance       int     `json:"importance"`
 	Performance      int     `json:"performance"`
 	Order            int     `json:"order"`
-	SuggestedMinutes int     `json:"suggested_minutes"` // 👈 ADICIONE ISSO AQUI!
+	SuggestedMinutes int     `json:"suggested_minutes"` // Usado no modo manual
 }
 
 type CycleConfigInput struct {
@@ -174,14 +174,28 @@ func CreateStudyCycle(c *gin.Context) {
 		return
 	}
 
-	// 2. Calcula os tempos (Automático)
+	// 2. Calcula os tempos (Automático ou Manual)
 	var itemsToSave []models.StudyCycleItem
 
-	if req.CycleType == "automatic" {
+	if req.CycleType == "automatic" || req.CycleType == "" {
 		itemsToSave = calculateCycleDistribution(req.Disciplines, req.ScheduleConfig.HoursPerDay, req.ScheduleConfig.MinSessionMinutes, req.ScheduleConfig.MaxSessionMinutes)
 	} else {
-		// Modo Manual (Aceita os tempos que o front mandou)
-		// ... lógica manual entra aqui depois
+		// Modo Manual: Aceita cegamente os tempos que o front mandou!
+		for _, disc := range req.Disciplines {
+			var nbID *uuid.UUID
+			if disc.NotebookID != nil && *disc.NotebookID != "" {
+				parsed, _ := uuid.Parse(*disc.NotebookID)
+				nbID = &parsed
+			}
+			itemsToSave = append(itemsToSave, models.StudyCycleItem{
+				NotebookID:       nbID,
+				Name:             disc.Name,
+				Importance:       disc.Importance,
+				Performance:      disc.Performance,
+				Sequence:         disc.Order,
+				SuggestedMinutes: disc.SuggestedMinutes,
+			})
+		}
 	}
 
 	// Inicia Transação Segura
@@ -307,19 +321,71 @@ func DeleteStudyCycle(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 LISTAR TODOS OS CICLOS DO SPACE
+// 📋 LISTAR TODOS OS CICLOS DO SPACE (V2 OTIMIZADA)
 // ==========================================================
 func ListStudyCycles(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	var cycles []models.StudyCycle
 
-	// O Preload("Items") é mágico: ele já traz as matérias embutidas dentro do ciclo!
+	// Busca os ciclos e os itens
 	if err := database.DB.Preload("Items").Where("space_id = ?", spaceID).Order("created_at desc").Find(&cycles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar ciclos."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"cycles": cycles})
+	// Criar um DTO para formatar a saída perfeita pro Front-end
+	var response []map[string]interface{}
+
+	for _, cycle := range cycles {
+		// 1. Converter AvailableDays (String) de volta para Array Real
+		var daysArray []string
+		if cycle.AvailableDays != "" {
+			json.Unmarshal([]byte(cycle.AvailableDays), &daysArray)
+		}
+
+		// 2. Preencher os nomes das matérias
+		var formattedItems []map[string]interface{}
+		for _, item := range cycle.Items {
+			var notebookName string
+			if item.NotebookID != nil {
+				database.DB.Table("notebooks").Select("name").Where("id = ?", item.NotebookID).Scan(&notebookName)
+			}
+
+			formattedItems = append(formattedItems, map[string]interface{}{
+				"id":                item.ID,
+				"notebook_id":       item.NotebookID,
+				"name":              notebookName, // 👈 Devolve o nome da matéria pro Front!
+				"sequence":          item.Sequence,
+				"importance":        item.Importance,
+				"performance":       item.Performance,
+				"suggested_minutes": item.SuggestedMinutes,
+			})
+		}
+
+		// 3. Monta o objeto final do ciclo
+		response = append(response, map[string]interface{}{
+			"id":                  cycle.ID,
+			"name":                cycle.Name,
+			"description":         cycle.Description,
+			"target_goal":         cycle.TargetGoal,
+			"target_date":         cycle.TargetDate,
+			"cycle_type":          cycle.CycleType,
+			"visibility":          cycle.Visibility,
+			"hours_per_day":       cycle.HoursPerDay,
+			"available_days":      daysArray, // 👈 Array real para os botões do Mayan
+			"min_session_minutes": cycle.MinSessionMin,
+			"max_session_minutes": cycle.MaxSessionMin,
+			"is_active":           cycle.IsActive,
+			"items":               formattedItems,
+		})
+	}
+
+	// Evita retornar null se não houver ciclos
+	if response == nil {
+		response = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"cycles": response})
 }
 
 // ==========================================================
