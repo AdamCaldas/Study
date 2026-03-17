@@ -166,3 +166,18 @@ func MarkNotificationAsRead(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Marcado como lido!"})
 }
+
+// ==========================================================
+// 🛡️ MODO DEUS: LISTAR TODAS AS NOTIFICAÇÕES
+// ==========================================================
+func ListAllNotifications(c *gin.Context) {
+	var notifications []models.Notification
+
+	// Puxa tudo, das mais novas pras mais velhas
+	if err := database.DB.Order("created_at desc").Find(&notifications).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar notificações"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"notifications": notifications})
+}

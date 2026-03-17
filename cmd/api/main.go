@@ -187,6 +187,7 @@ func main() {
 		godMode.POST("/notifications", admin.CreateNotification)
 		godMode.PUT("/notifications/:id", admin.UpdateNotification)
 		godMode.DELETE("/notifications/:id", admin.DeleteNotification)
+		godMode.GET("/notifications", admin.ListAllNotifications) // 👈 ADICIONE ESTA LINHA AQUI!
 
 	}
 
