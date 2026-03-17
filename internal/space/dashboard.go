@@ -48,13 +48,13 @@ func GetSpaceDashboard(c *gin.Context) {
 
 	database.DB.Table("space_permissions").
 		Select(`users.id as user_id, users.full_name, users.email, users.profile_pic, 
-			space_permissions.access_level, space_permissions.can_edit_space_info, 
-			space_permissions.can_edit_space_color, space_permissions.can_create_content, 
-			space_permissions.can_edit_content, space_permissions.can_delete_content, 
-			space_permissions.can_manage_tags, space_permissions.can_manage_members, 
-			space_permissions.can_send_invites, space_permissions.can_search_content, 
-			space_permissions.can_change_settings, space_permissions.can_manage_plans, 
-			space_permissions.can_manage_cycles, space_permissions.can_manage_quizzes`).
+            space_permissions.access_level, space_permissions.can_edit_space_info, 
+            space_permissions.can_edit_space_color, space_permissions.can_create_content, 
+            space_permissions.can_edit_content, space_permissions.can_delete_content, 
+            space_permissions.can_manage_tags, space_permissions.can_manage_members, 
+            space_permissions.can_send_invites, space_permissions.can_search_content, 
+            space_permissions.can_change_settings, space_permissions.can_manage_plans, 
+            space_permissions.can_manage_cycles, space_permissions.can_manage_quizzes`).
 		Joins("join users on users.id = space_permissions.user_id").
 		Where("space_permissions.space_id = ?", spaceID).
 		Scan(&collaborators)
@@ -86,6 +86,25 @@ func GetSpaceDashboard(c *gin.Context) {
 	// 📚 4. Cadernos COM AS PÁGINAS (Agora já vêm com as Assinaturas Digitais preenchidas!)
 	var notebooks []models.Notebook
 	database.DB.Preload("Pages").Where("space_id = ?", spaceID).Find(&notebooks)
+
+	// ---------------------------------------------------------
+	// 🧙‍♂️ MÁGICA: Preencher o owner_name das páginas
+	// ---------------------------------------------------------
+	for i := range notebooks {
+		for j := range notebooks[i].Pages {
+			var authorName string
+
+			// Vai na tabela de usuários e pesca só o Nome do cara pelo ID
+			database.DB.Table("users").
+				Select("full_name").
+				Where("id = ?", notebooks[i].Pages[j].CreatedByID).
+				Scan(&authorName)
+
+			// Injeta o nome no campo virtual que criamos no models.go
+			notebooks[i].Pages[j].OwnerName = authorName
+		}
+	}
+	// ---------------------------------------------------------
 
 	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
 	var notebookPermissions []models.NotebookPermission

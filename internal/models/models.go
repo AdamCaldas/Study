@@ -116,6 +116,7 @@ type Page struct {
 	Title      string    `gorm:"size:255;not null" json:"title"`
 	Content    string    `gorm:"type:jsonb" json:"content"`
 	Order      int       `json:"order"`
+	OwnerName  string    `gorm:"-" json:"owner_name"`
 
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
