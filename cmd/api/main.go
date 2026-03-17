@@ -67,6 +67,12 @@ func main() {
 		protected.DELETE("/me", users.DeleteMyAccount)
 
 		// ------------------------------------------------------
+		// 🔔 1.5 NOTIFICAÇÕES DO ALUNO
+		// ------------------------------------------------------
+		protected.GET("/notifications", admin.GetMyNotifications)
+		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
+
+		// ------------------------------------------------------
 		// 🎮 2. GAMIFICAÇÃO E FOCO
 		// ------------------------------------------------------
 		protected.POST("/gamification/reward", gamification.RewardXP)
@@ -133,7 +139,8 @@ func main() {
 			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)
 			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
 			spaceRoutes.POST("/cycles/simulate", study.SimulateStudyCycle)
-
+			spaceRoutes.GET("/cycles", study.ListStudyCycles)
+			spaceRoutes.PUT("/cycles/:cycle_id", study.UpdateStudyCycle)
 			// 👉 Revisões e Quizzes (Apenas Ações)
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
@@ -175,6 +182,12 @@ func main() {
 		godMode.GET("/gamification/rules", admin.ListGamificationRules)
 		godMode.POST("/gamification/rules", admin.CreateGamificationRule)
 		godMode.PUT("/gamification/rules/:rule_id", admin.UpdateGamificationRule)
+
+		// 🎯 GESTÃO DE NOTIFICAÇÕES (ADMIN)
+		godMode.POST("/notifications", admin.CreateNotification)
+		godMode.PUT("/notifications/:id", admin.UpdateNotification)
+		godMode.DELETE("/notifications/:id", admin.DeleteNotification)
+
 	}
 
 	port := os.Getenv("PORT")

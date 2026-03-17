@@ -18,11 +18,12 @@ import (
 // ESTRUTURAS DE ENTRADA (O JSON que o Front-end vai mandar)
 // ==========================================================
 type CycleDisciplineInput struct {
-	NotebookID  *string `json:"notebook_id"`
-	Name        string  `json:"name"`
-	Importance  int     `json:"importance"`
-	Performance int     `json:"performance"`
-	Order       int     `json:"order"`
+	NotebookID       *string `json:"notebook_id"`
+	Name             string  `json:"name"`
+	Importance       int     `json:"importance"`
+	Performance      int     `json:"performance"`
+	Order            int     `json:"order"`
+	SuggestedMinutes int     `json:"suggested_minutes"` // 👈 ADICIONE ISSO AQUI!
 }
 
 type CycleConfigInput struct {
@@ -303,4 +304,121 @@ func DeleteStudyCycle(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Ciclo deletado com sucesso!"})
+}
+
+// ==========================================================
+// 📋 LISTAR TODOS OS CICLOS DO SPACE
+// ==========================================================
+func ListStudyCycles(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	var cycles []models.StudyCycle
+
+	// O Preload("Items") é mágico: ele já traz as matérias embutidas dentro do ciclo!
+	if err := database.DB.Preload("Items").Where("space_id = ?", spaceID).Order("created_at desc").Find(&cycles).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar ciclos."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"cycles": cycles})
+}
+
+// ==========================================================
+// ✏️ EDITAR CICLO (A Marcha Ré)
+// ==========================================================
+func UpdateStudyCycle(c *gin.Context) {
+	cycleID := c.Param("cycle_id")
+	spaceIDStr := c.Param("space_id")
+	spaceID, _ := uuid.Parse(spaceIDStr)
+
+	// Pega o ID do usuário para caso precise criar cadernos novos
+	userIDInterface, _ := c.Get("userID")
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	}
+
+	var req CreateCycleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	var cycle models.StudyCycle
+	if err := database.DB.Where("id = ? AND space_id = ?", cycleID, spaceID).First(&cycle).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Ciclo não encontrado."})
+		return
+	}
+
+	var itemsToSave []models.StudyCycleItem
+
+	// MÁGICA DO MODO AUTOMÁTICO VS MANUAL
+	if req.CycleType == "automatic" {
+		itemsToSave = calculateCycleDistribution(req.Disciplines, req.ScheduleConfig.HoursPerDay, req.ScheduleConfig.MinSessionMinutes, req.ScheduleConfig.MaxSessionMinutes)
+	} else {
+		// MODO MANUAL: Aceita cegamente os minutos que o Front-end enviou!
+		for _, disc := range req.Disciplines {
+			var nbID *uuid.UUID
+			if disc.NotebookID != nil && *disc.NotebookID != "" {
+				parsed, _ := uuid.Parse(*disc.NotebookID)
+				nbID = &parsed
+			}
+			itemsToSave = append(itemsToSave, models.StudyCycleItem{
+				NotebookID:       nbID,
+				Name:             disc.Name,
+				Importance:       disc.Importance,
+				Performance:      disc.Performance,
+				Sequence:         disc.Order,
+				SuggestedMinutes: disc.SuggestedMinutes, // O tempo que o Mayan definiu!
+			})
+		}
+	}
+
+	// Inicia Transação Segura
+	tx := database.DB.Begin()
+
+	// Cria cadernos automáticos se não existirem
+	for i, item := range itemsToSave {
+		if item.NotebookID == nil {
+			newNb := models.Notebook{
+				SpaceID: spaceID, Name: item.Name, ColorHex: "#8B5CF6", CreatedByID: userID, UpdatedByID: userID,
+			}
+			if err := tx.Create(&newNb).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar caderno: " + item.Name})
+				return
+			}
+			itemsToSave[i].NotebookID = &newNb.ID
+		}
+	}
+
+	// APAGA os itens velhos e SALVA os novos (O jeito mais limpo de atualizar listas)
+	tx.Where("cycle_id = ?", cycle.ID).Delete(&models.StudyCycleItem{})
+
+	availableDaysJSON, _ := json.Marshal(req.ScheduleConfig.AvailableDays)
+
+	// Atualiza os dados do Ciclo principal
+	cycle.Name = req.Name
+	cycle.Description = req.Description
+	cycle.TargetGoal = req.TargetGoal
+	cycle.TargetDate = req.TargetDate
+	cycle.CycleType = req.CycleType
+	cycle.Visibility = req.Visibility
+	cycle.HoursPerDay = req.ScheduleConfig.HoursPerDay
+	cycle.AvailableDays = string(availableDaysJSON)
+	cycle.MinSessionMin = req.ScheduleConfig.MinSessionMinutes
+	cycle.MaxSessionMin = req.ScheduleConfig.MaxSessionMinutes
+	cycle.Items = itemsToSave // O GORM insere os novos itens magicamente!
+
+	if err := tx.Save(&cycle).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar o ciclo."})
+		return
+	}
+
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Ciclo atualizado com sucesso!", "cycle": cycle})
 }

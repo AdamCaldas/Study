@@ -290,3 +290,29 @@ type GamificationRule struct {
 	Description string    `json:"description"`                                 // Ex: "Completar um Pomodoro de 25 min"
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// ==========================================================
+// 🔔 SISTEMA DE NOTIFICAÇÕES (Mural, Sino e Pop-up)
+// ==========================================================
+type Notification struct {
+	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Title     string     `gorm:"size:255;not null" json:"title"`
+	Message   string     `gorm:"type:text;not null" json:"message"`
+	Type      string     `gorm:"size:50;not null" json:"type"`     // POPUP | BELL | NEWS
+	Audience  string     `gorm:"size:50;not null" json:"audience"` // GLOBAL | SPACES | USERS
+	TargetIDs string     `gorm:"type:jsonb" json:"target_ids"`     // Array de IDs salvo como JSON (Vazio se for GLOBAL)
+	IsActive  bool       `gorm:"default:true" json:"is_active"`    // Botão de pânico: false esconde a notificação na hora
+	ExpiresAt *time.Time `json:"expires_at"`                       // Opcional: Data para o aviso sumir sozinho
+
+	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Tabela leve só para registrar quem clicou em "Lido"
+type NotificationRead struct {
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	NotificationID uuid.UUID `gorm:"type:uuid;index;not null" json:"notification_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	ReadAt         time.Time `gorm:"autoCreateTime" json:"read_at"`
+}
