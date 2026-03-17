@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
+	"time"
 
 	"studfy-backend/internal/admin"
 	"studfy-backend/internal/auth"
@@ -15,6 +17,7 @@ import (
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
@@ -28,6 +31,11 @@ func main() {
 	database.ConnectDB()
 
 	router := gin.Default()
+
+	// ==========================================================
+	// 🗜️ 1. GZIP GLOBAL (Comprime respostas em até 90%)
+	// ==========================================================
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
 
 	// ==========================================================
 	// 🌐 CONFIGURAÇÃO DE CORS E HEADERS
@@ -118,22 +126,22 @@ func main() {
 			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)
 			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator)
 
-			// 👉 Cadernos (Apenas Ações. O 'GET' foi apagado!)
+			// 👉 Cadernos
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
 
-			// 👉 Notas Rápidas (Apenas Ações)
+			// 👉 Notas Rápidas
 			spaceRoutes.POST("/notes", space.CreateQuickNote)
 			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
-			// 👉 Plano de Estudos (Apenas Ações)
+			// 👉 Plano de Estudos
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
-			// 👉 Ciclos de Estudo (Apenas Ações)
+			// 👉 Ciclos de Estudo
 			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
 			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
 			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)
@@ -141,7 +149,8 @@ func main() {
 			spaceRoutes.POST("/cycles/simulate", study.SimulateStudyCycle)
 			spaceRoutes.GET("/cycles", study.ListStudyCycles)
 			spaceRoutes.PUT("/cycles/:cycle_id", study.UpdateStudyCycle)
-			// 👉 Revisões e Quizzes (Apenas Ações)
+
+			// 👉 Revisões e Quizzes
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
 		}
@@ -177,25 +186,37 @@ func main() {
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
 
-		// 🎯 GESTÃO DE GAMIFICAÇÃO (NOVO)
+		// 🎯 GESTÃO DE GAMIFICAÇÃO
 		godMode.PUT("/users/:id/xp", admin.UpdateUserXP)
 		godMode.GET("/gamification/rules", admin.ListGamificationRules)
 		godMode.POST("/gamification/rules", admin.CreateGamificationRule)
 		godMode.PUT("/gamification/rules/:rule_id", admin.UpdateGamificationRule)
 
-		// 🎯 GESTÃO DE NOTIFICAÇÕES (ADMIN)
+		// 🎯 GESTÃO DE NOTIFICAÇÕES
 		godMode.POST("/notifications", admin.CreateNotification)
 		godMode.PUT("/notifications/:id", admin.UpdateNotification)
 		godMode.DELETE("/notifications/:id", admin.DeleteNotification)
-		godMode.GET("/notifications", admin.ListAllNotifications) // 👈 ADICIONE ESTA LINHA AQUI!
-
+		godMode.GET("/notifications", admin.ListAllNotifications)
 	}
 
+	// ==========================================================
+	// 🚀 LIGANDO O MOTOR (Com Proteção Nativa de Timeout)
+	// ==========================================================
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      router,
+		ReadTimeout:  10 * time.Second, // Corta se a requisição for muito lenta
+		WriteTimeout: 15 * time.Second, // Corta se o servidor travar para responder
+		IdleTimeout:  60 * time.Second, // Economiza memória RAM
+	}
+
 	log.Printf("Iniciando servidor na porta %s...", port)
-	router.Run(":" + port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Erro crítico no servidor: %v", err)
+	}
 }

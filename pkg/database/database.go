@@ -34,10 +34,13 @@ func ConnectDB() {
 		log.Fatal("Falha ao pegar a instância genérica do banco: ", err)
 	}
 
-	// Configurações de performance da fila de conexões
-	sqlDB.SetMaxOpenConns(100)
+	// 🛡️ BLINDAGEM DO POOL DE CONEXÕES (Turbo no Banco)
+	// Máximo de conexões abertas ao mesmo tempo (50 para o Supabase free)
+	sqlDB.SetMaxOpenConns(50)
+	// Máximo de conexões "dormindo" guardadas na memória para respostas super rápidas
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	// Tempo máximo que uma conexão pode ficar aberta antes de ser reciclada
+	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	DB = db
 	log.Println("✅ Conexão com PostgreSQL (Pooler) estabelecida com sucesso!")
@@ -64,10 +67,10 @@ func ConnectDB() {
 		&models.Quiz{},
 		&models.QuizQuestion{},
 		&models.SpaceJoinRequest{},
-		&models.Notification{},       // 👈 ADICIONE ESSA!
-		&models.NotificationRead{},   // 👈 E ADICIONE ESSA!
-		&models.NotebookPermission{}, // 👈 Cria a tabela de permissões de caderno
-		&models.GamificationRule{},   // 👈 Cria a tabela de regras de XP
+		&models.Notification{},       // Tabela de Notificações Gerais
+		&models.NotificationRead{},   // Controle de Lidos do Sino
+		&models.NotebookPermission{}, // Permissões de caderno
+		&models.GamificationRule{},   // Regras de XP
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
