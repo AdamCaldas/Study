@@ -64,8 +64,10 @@ func ConnectDB() {
 		&models.Quiz{},
 		&models.QuizQuestion{},
 		&models.SpaceJoinRequest{},
-		&models.Notification{},     // 👈 ADICIONE ESSA!
-		&models.NotificationRead{}, // 👈 E ADICIONE ESSA!
+		&models.Notification{},       // 👈 ADICIONE ESSA!
+		&models.NotificationRead{},   // 👈 E ADICIONE ESSA!
+		&models.NotebookPermission{}, // 👈 Cria a tabela de permissões de caderno
+		&models.GamificationRule{},   // 👈 Cria a tabela de regras de XP
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
