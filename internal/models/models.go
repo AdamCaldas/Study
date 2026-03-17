@@ -102,6 +102,8 @@ type Notebook struct {
 	ColorHex string    `gorm:"size:7" json:"color_hex"`
 	Pages    []Page    `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"`
 
+	OwnerName string `gorm:"-" json:"owner_name"`
+
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`

@@ -88,20 +88,19 @@ func GetSpaceDashboard(c *gin.Context) {
 	database.DB.Preload("Pages").Where("space_id = ?", spaceID).Find(&notebooks)
 
 	// ---------------------------------------------------------
-	// 🧙‍♂️ MÁGICA: Preencher o owner_name das páginas
+	// 🧙‍♂️ MÁGICA: Preencher o owner_name dos Cadernos e das Páginas
 	// ---------------------------------------------------------
 	for i := range notebooks {
+		// 1. Pega o nome do dono do CADERNO 👈 (NOVO)
+		var notebookAuthor string
+		database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].CreatedByID).Scan(&notebookAuthor)
+		notebooks[i].OwnerName = notebookAuthor
+
+		// 2. Pega o nome do dono de CADA PÁGINA
 		for j := range notebooks[i].Pages {
-			var authorName string
-
-			// Vai na tabela de usuários e pesca só o Nome do cara pelo ID
-			database.DB.Table("users").
-				Select("full_name").
-				Where("id = ?", notebooks[i].Pages[j].CreatedByID).
-				Scan(&authorName)
-
-			// Injeta o nome no campo virtual que criamos no models.go
-			notebooks[i].Pages[j].OwnerName = authorName
+			var pageAuthor string
+			database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Pages[j].CreatedByID).Scan(&pageAuthor)
+			notebooks[i].Pages[j].OwnerName = pageAuthor
 		}
 	}
 	// ---------------------------------------------------------
