@@ -15,14 +15,15 @@ import (
 // 1️⃣ CREATE PAGE
 // ==========================================================
 type CreatePageInput struct {
-	Title   string          `json:"title" binding:"required"`
-	Content json.RawMessage `json:"content"`
-	Order   int             `json:"order"`
-	GuideID *uuid.UUID      `json:"guide_id"` // 👈 NOVO: Sabe se vai para dentro de uma pasta
+	Title   string           `json:"title" binding:"required"`
+	Content json.RawMessage  `json:"content"`
+	Order   int              `json:"order"`
+	GuideID *uuid.UUID       `json:"guide_id"`
+	Tags    []models.PageTag `json:"tags"` // 👈 NOVO: Recebe as Tags na criação
 }
 
 func CreatePage(c *gin.Context) {
-	parsedUserID := getUserID(c) // Usa a função auxiliar do notebook.go!
+	parsedUserID := getUserID(c) // Usa a função auxiliar do notebook.go
 	notebookIDStr := c.Param("notebook_id")
 	parsedNotebookID, _ := uuid.Parse(notebookIDStr)
 
@@ -32,7 +33,7 @@ func CreatePage(c *gin.Context) {
 		return
 	}
 
-	// Usa o Leão de Chácara que tá no notebook.go
+	// Usa o Leão de Chácara
 	if !canEditNotebook(notebook.SpaceID, parsedNotebookID, parsedUserID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para adicionar páginas aqui."})
 		return
@@ -48,14 +49,20 @@ func CreatePage(c *gin.Context) {
 		input.Content = []byte("{}")
 	}
 
+	// Garante que o array de tags não fique nulo
+	if input.Tags == nil {
+		input.Tags = []models.PageTag{}
+	}
+
 	newPage := models.Page{
 		NotebookID:  parsedNotebookID,
-		GuideID:     input.GuideID, // 👈 Se mandar nulo, fica solta. Se mandar ID, entra na pasta.
+		GuideID:     input.GuideID,
 		Title:       input.Title,
 		Content:     string(input.Content),
 		Order:       input.Order,
-		CreatedByID: parsedUserID, // ASSINATURA
-		UpdatedByID: parsedUserID, // ASSINATURA
+		Tags:        input.Tags, // 👈 Salvando as Tags!
+		CreatedByID: parsedUserID,
+		UpdatedByID: parsedUserID,
 	}
 
 	if err := database.DB.Create(&newPage).Error; err != nil {
@@ -73,7 +80,8 @@ type UpdatePageInput struct {
 	Title   string                 `json:"title"`
 	Content map[string]interface{} `json:"content"`
 	Order   int                    `json:"order"`
-	GuideID *uuid.UUID             `json:"guide_id"` // 👈 NOVO: Permite arrastar a página de uma pasta pra outra
+	GuideID *uuid.UUID             `json:"guide_id"`
+	Tags    *[]models.PageTag      `json:"tags"` // 👈 NOVO: Ponteiro para saber se o usuário enviou alteração de tags
 }
 
 func UpdatePage(c *gin.Context) {
@@ -103,12 +111,16 @@ func UpdatePage(c *gin.Context) {
 	updates := map[string]interface{}{
 		"title":         input.Title,
 		"order":         input.Order,
-		"updated_by_id": parsedUserID, // ASSINATURA
+		"updated_by_id": parsedUserID,
 	}
 
-	// Permite mudar a página de pasta
 	if input.GuideID != nil {
 		updates["guide_id"] = input.GuideID
+	}
+
+	// 👇 VERIFICA E ATUALIZA AS TAGS
+	if input.Tags != nil {
+		updates["tags"] = *input.Tags
 	}
 
 	if len(input.Content) > 0 {
@@ -121,7 +133,7 @@ func UpdatePage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Página atualizada!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Página atualizada com sucesso!"})
 }
 
 // ==========================================================

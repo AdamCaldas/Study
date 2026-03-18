@@ -171,6 +171,8 @@ type Page struct {
 	Content string `gorm:"type:jsonb" json:"content"`
 	Order   int    `json:"order"` // Para numerar as páginas na lista
 
+	Tags []PageTag `gorm:"type:jsonb;default:'[]'" json:"tags"`
+
 	OwnerName   string `gorm:"-" json:"owner_name"`
 	UpdaterName string `gorm:"-" json:"updater_name"` // 👈 ADICIONE ISSO
 
@@ -377,4 +379,10 @@ type NotificationRead struct {
 	NotificationID uuid.UUID `gorm:"type:uuid;index;not null" json:"notification_id"`
 	UserID         uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
 	ReadAt         time.Time `gorm:"autoCreateTime" json:"read_at"`
+}
+
+// PageTag - Estrutura das tags coloridas das páginas
+type PageTag struct {
+	Name     string `json:"name"`
+	ColorHex string `json:"color_hex"`
 }
