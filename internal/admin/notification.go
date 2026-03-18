@@ -14,13 +14,17 @@ import (
 
 // Estrutura do JSON que você vai mandar para criar/editar
 type NotificationInput struct {
-	Title     string     `json:"title" binding:"required"`
-	Message   string     `json:"message" binding:"required"`
-	Type      string     `json:"type" binding:"required"`     // POPUP, BELL, NEWS
-	Audience  string     `json:"audience" binding:"required"` // GLOBAL, SPACES, USERS
-	TargetIDs []string   `json:"target_ids"`                  // IDs específicos (se houver)
-	ExpiresAt *time.Time `json:"expires_at"`
-	IsActive  *bool      `json:"is_active"`
+	Title     string   `json:"title" binding:"required"`
+	Message   string   `json:"message" binding:"required"`
+	Type      string   `json:"type" binding:"required"`     // POPUP, BELL, NEWS
+	Audience  string   `json:"audience" binding:"required"` // GLOBAL, SPACES, USERS
+	TargetIDs []string `json:"target_ids"`                  // IDs específicos (se houver)
+
+	// 👇 NOVOS CAMPOS DE DATA AQUI
+	StartAt *time.Time `json:"start_at"`
+	EndAt   *time.Time `json:"end_at"`
+
+	IsActive *bool `json:"is_active"`
 }
 
 // ==========================================================
@@ -41,7 +45,14 @@ func CreateNotification(c *gin.Context) {
 		Type:      req.Type,
 		Audience:  req.Audience,
 		TargetIDs: string(targetJSON),
-		ExpiresAt: req.ExpiresAt,
+		EndAt:     req.EndAt,
+	}
+
+	// ⏳ Se mandar o StartAt, usa ele. Se não mandar, usa a data de agora!
+	if req.StartAt != nil {
+		notif.StartAt = *req.StartAt
+	} else {
+		notif.StartAt = time.Now()
 	}
 
 	if err := database.DB.Create(&notif).Error; err != nil {
@@ -76,7 +87,11 @@ func UpdateNotification(c *gin.Context) {
 	notif.Type = req.Type
 	notif.Audience = req.Audience
 	notif.TargetIDs = string(targetJSON)
-	notif.ExpiresAt = req.ExpiresAt
+	notif.EndAt = req.EndAt
+
+	if req.StartAt != nil {
+		notif.StartAt = *req.StartAt
+	}
 
 	if req.IsActive != nil {
 		notif.IsActive = *req.IsActive // Permite pausar/ocultar a notificação
@@ -106,7 +121,7 @@ func GetMyNotifications(c *gin.Context) {
 	userIDInterface, _ := c.Get("userID")
 	var userID string
 
-	// 🛡️ Trava de segurança: Descobre se o ID veio como UUID ou String e converte certo
+	// 🛡️ Trava de segurança
 	switch v := userIDInterface.(type) {
 	case uuid.UUID:
 		userID = v.String()
@@ -119,12 +134,13 @@ func GetMyNotifications(c *gin.Context) {
 
 	var notifications []models.Notification
 
-	// A Query super otimizada
+	// ⏳ A QUERY MÁGICA ATUALIZADA COM START_AT E END_AT
 	database.DB.Raw(`
 		SELECT n.* FROM notifications n
 		LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
 		WHERE n.is_active = true 
-		AND (n.expires_at IS NULL OR n.expires_at > NOW())
+		AND n.start_at <= NOW() -- 👈 Só aparece se a data inicial já chegou
+		AND (n.end_at IS NULL OR n.end_at > NOW()) -- 👈 Não tem validade, ou ainda não venceu
 		AND nr.id IS NULL -- Só traz as que ele AINDA NÃO LEU!
 		AND (
 			n.audience = 'GLOBAL' 

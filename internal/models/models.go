@@ -94,38 +94,80 @@ type NotebookPermission struct {
 	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"` // VIEWER, EDITOR
 }
 
-// NOTEBOOK
+// ==========================================================
+// 📚 ESTRUTURA DE DOCUMENTOS: NOTEBOOK -> GUIDE -> PAGE
+// ==========================================================
+
+// NOTEBOOK (A Capa do Caderno)
 type Notebook struct {
 	ID       uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID  uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	Name     string    `gorm:"size:100;not null" json:"name"`
 	ColorHex string    `gorm:"size:7" json:"color_hex"`
-	Pages    []Page    `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"`
+
+	// 👇 NOVOS RELACIONAMENTOS
+	Guides []Guide `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"guides"`
+	Pages  []Page  `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"` // Páginas soltas (sem guia)
 
 	OwnerName string `gorm:"-" json:"owner_name"`
 
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
-	CreatedAt   time.Time `json:"created_at"` // O GORM preenche sozinho
-	UpdatedAt   time.Time `json:"updated_at"` // O GORM atualiza sozinho
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// PAGE (O Arquivo de Texto JSONB)
+// 📁 GUIDE (A Nova "Pasta" estilo Google Docs)
+type Guide struct {
+	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	NotebookID uuid.UUID `gorm:"type:uuid;index;not null" json:"notebook_id"`
+
+	// 👇 A MÁGICA DO SUB-GUIDE: Uma guia pode pertencer a outra guia!
+	ParentGuideID *uuid.UUID `gorm:"type:uuid;index" json:"parent_guide_id"`
+
+	Name        string `gorm:"size:255;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description"`
+	Icon        string `gorm:"size:50" json:"icon"`
+	ColorHex    string `gorm:"size:7" json:"color_hex"`
+	Order       int    `json:"order"`
+
+	OwnerName string `gorm:"-" json:"owner_name"` // Campo Virtual
+
+	// Relacionamentos em Cascata
+	Pages     []Page  `gorm:"foreignKey:GuideID;constraint:OnDelete:CASCADE" json:"pages"`
+	SubGuides []Guide `gorm:"foreignKey:ParentGuideID;constraint:OnDelete:CASCADE" json:"sub_guides"`
+
+	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// 📄 PAGE (O Arquivo de Texto JSONB)
 type Page struct {
 	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	NotebookID uuid.UUID `gorm:"type:uuid;index" json:"notebook_id"`
-	Title      string    `gorm:"size:255;not null" json:"title"`
-	Content    string    `gorm:"type:jsonb" json:"content"`
-	Order      int       `json:"order"`
-	OwnerName  string    `gorm:"-" json:"owner_name"`
+	NotebookID uuid.UUID `gorm:"type:uuid;index;not null" json:"notebook_id"` // Sempre vinculada a um caderno
+
+	// 👇 NOVO: A página agora sabe em qual Guia/Pasta ela está!
+	GuideID *uuid.UUID `gorm:"type:uuid;index" json:"guide_id"`
+
+	Title   string `gorm:"size:255;not null" json:"title"`
+	Content string `gorm:"type:jsonb" json:"content"`
+	Order   int    `json:"order"` // Para numerar as páginas na lista
+
+	OwnerName string `gorm:"-" json:"owner_name"`
 
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
-	CreatedAt   time.Time `json:"created_at"` // O GORM preenche sozinho
-	UpdatedAt   time.Time `json:"updated_at"` // O GORM atualiza sozinho
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// ==========================================================
+// RESTO DOS MODELOS GERAIS
+// ==========================================================
 
 // QUICK NOTE
 type QuickNote struct {
@@ -137,9 +179,7 @@ type QuickNote struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// ==========================================================
 // STUDY CYCLE (A Roleta Inteligente)
-// ==========================================================
 type StudyCycle struct {
 	ID            uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID       uuid.UUID  `gorm:"type:uuid;index" json:"space_id"`
@@ -298,14 +338,17 @@ type GamificationRule struct {
 // 🔔 SISTEMA DE NOTIFICAÇÕES (Mural, Sino e Pop-up)
 // ==========================================================
 type Notification struct {
-	ID        uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	Title     string     `gorm:"size:255;not null" json:"title"`
-	Message   string     `gorm:"type:text;not null" json:"message"`
-	Type      string     `gorm:"size:50;not null" json:"type"`     // POPUP | BELL | NEWS
-	Audience  string     `gorm:"size:50;not null" json:"audience"` // GLOBAL | SPACES | USERS
-	TargetIDs string     `gorm:"type:jsonb" json:"target_ids"`     // Array de IDs salvo como JSON (Vazio se for GLOBAL)
-	IsActive  bool       `gorm:"default:true" json:"is_active"`    // Botão de pânico: false esconde a notificação na hora
-	ExpiresAt *time.Time `json:"expires_at"`                       // Opcional: Data para o aviso sumir sozinho
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Title     string    `gorm:"size:255;not null" json:"title"`
+	Message   string    `gorm:"type:text;not null" json:"message"`
+	Type      string    `gorm:"size:50;not null" json:"type"`     // POPUP | BELL | NEWS
+	Audience  string    `gorm:"size:50;not null" json:"audience"` // GLOBAL | SPACES | USERS
+	TargetIDs string    `gorm:"type:jsonb" json:"target_ids"`     // Array de IDs salvo como JSON (Vazio se for GLOBAL)
+	IsActive  bool      `gorm:"default:true" json:"is_active"`    // Botão de pânico: false esconde a notificação na hora
+
+	// 👇 NOVOS CAMPOS DE PRAZO
+	StartAt time.Time  `gorm:"default:now()" json:"start_at"`
+	EndAt   *time.Time `json:"end_at"` // Opcional: Data para o aviso sumir sozinho
 
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
 	CreatedAt   time.Time `json:"created_at"`

@@ -71,6 +71,7 @@ func ConnectDB() {
 		&models.NotificationRead{},   // Controle de Lidos do Sino
 		&models.NotebookPermission{}, // Permissões de caderno
 		&models.GamificationRule{},   // Regras de XP
+		&models.Guide{},              // 👈 ADICIONE A TABAELA DE GUIAS AQUI!
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)

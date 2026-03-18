@@ -83,36 +83,65 @@ func GetSpaceDashboard(c *gin.Context) {
 		}{}
 	}
 
-	// 📚 4. Cadernos COM AS PÁGINAS (Agora já vêm com as Assinaturas Digitais preenchidas!)
+	// 📚 4. Cadernos COM AS PÁGINAS E GUIAS ANINHADAS
 	var notebooks []models.Notebook
-	database.DB.Preload("Pages").Where("space_id = ?", spaceID).Find(&notebooks)
+	database.DB.
+		Preload("Pages").                  // Puxa as páginas soltas
+		Preload("Guides.Pages").           // Puxa as Guias principais e suas páginas
+		Preload("Guides.SubGuides.Pages"). // Puxa as Sub-Guias e suas páginas
+		Where("space_id = ?", spaceID).
+		Find(&notebooks)
 
 	// ---------------------------------------------------------
-	// 🧙‍♂️ MÁGICA: Preencher o owner_name dos Cadernos e das Páginas
+	// 🧙‍♂️ MÁGICA: Preencher o owner_name de TODA a árvore de pastas
 	// ---------------------------------------------------------
 	for i := range notebooks {
-		// 1. Pega o nome do dono do CADERNO 👈 (NOVO)
+		// 1. Dono do CADERNO
 		var notebookAuthor string
 		database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].CreatedByID).Scan(&notebookAuthor)
 		notebooks[i].OwnerName = notebookAuthor
 
-		// 2. Pega o nome do dono de CADA PÁGINA
+		// 2. Dono das PÁGINAS SOLTAS
 		for j := range notebooks[i].Pages {
 			var pageAuthor string
 			database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Pages[j].CreatedByID).Scan(&pageAuthor)
 			notebooks[i].Pages[j].OwnerName = pageAuthor
+		}
+
+		// 3. Dono das GUIAS (Pastas) e suas páginas
+		for k := range notebooks[i].Guides {
+			var guideAuthor string
+			database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].CreatedByID).Scan(&guideAuthor)
+			notebooks[i].Guides[k].OwnerName = guideAuthor
+
+			for l := range notebooks[i].Guides[k].Pages {
+				var gPageAuthor string
+				database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].Pages[l].CreatedByID).Scan(&gPageAuthor)
+				notebooks[i].Guides[k].Pages[l].OwnerName = gPageAuthor
+			}
+
+			// 4. Dono das SUB-GUIAS (Pastas dentro de Pastas) e suas páginas
+			for m := range notebooks[i].Guides[k].SubGuides {
+				var subGuideAuthor string
+				database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].SubGuides[m].CreatedByID).Scan(&subGuideAuthor)
+				notebooks[i].Guides[k].SubGuides[m].OwnerName = subGuideAuthor
+
+				for n := range notebooks[i].Guides[k].SubGuides[m].Pages {
+					var sgPageAuthor string
+					database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].SubGuides[m].Pages[n].CreatedByID).Scan(&sgPageAuthor)
+					notebooks[i].Guides[k].SubGuides[m].Pages[n].OwnerName = sgPageAuthor
+				}
+			}
 		}
 	}
 	// ---------------------------------------------------------
 
 	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
 	var notebookPermissions []models.NotebookPermission
-	// Faz um JOIN para buscar apenas as permissões dos cadernos que estão DENTRO deste Space
 	database.DB.Joins("JOIN notebooks ON notebooks.id = notebook_permissions.notebook_id").
 		Where("notebooks.space_id = ?", spaceID).
 		Find(&notebookPermissions)
 
-	// Evita mandar null pro Front
 	if notebookPermissions == nil {
 		notebookPermissions = []models.NotebookPermission{}
 	}
@@ -147,7 +176,7 @@ func GetSpaceDashboard(c *gin.Context) {
 		"owner":                owner,
 		"collaborators":        collaborators,
 		"notebooks":            notebooks,
-		"notebook_permissions": notebookPermissions, // 👈 Nova trava enviada ao Front-end!
+		"notebook_permissions": notebookPermissions,
 		"all_cycles":           cycles,
 		"active_cycle":         activeCycle,
 		"study_plans":          studyPlans,
