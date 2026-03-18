@@ -132,22 +132,34 @@ func GetMyNotifications(c *gin.Context) {
 		return
 	}
 
+	// 🌟 NOVIDADE: Buscar a data de criação da conta para classificar o utilizador
+	var user models.User
+	if err := database.DB.Select("created_at").Where("id = ?", userID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Utilizador não encontrado"})
+		return
+	}
+
+	// 🧠 REGRA DE NEGÓCIO: É um novo utilizador se a conta tiver menos de 7 dias (168 horas)
+	isNewUser := time.Since(user.CreatedAt).Hours() < (7 * 24)
+
 	var notifications []models.Notification
 
-	// ⏳ A QUERY MÁGICA ATUALIZADA COM START_AT E END_AT
+	// ⏳ A QUERY MÁGICA ATUALIZADA COM FILTROS DE TEMPO E PÚBLICO-ALVO
 	database.DB.Raw(`
 		SELECT n.* FROM notifications n
 		LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
 		WHERE n.is_active = true 
-		AND n.start_at <= NOW() -- 👈 Só aparece se a data inicial já chegou
-		AND (n.end_at IS NULL OR n.end_at > NOW()) -- 👈 Não tem validade, ou ainda não venceu
+		AND n.start_at <= NOW() -- Só aparece se a data inicial já chegou
+		AND (n.end_at IS NULL OR n.end_at > NOW()) -- Não tem validade, ou ainda não venceu
 		AND nr.id IS NULL -- Só traz as que ele AINDA NÃO LEU!
 		AND (
 			n.audience = 'GLOBAL' 
 			OR (n.audience = 'USERS' AND n.target_ids::jsonb @> ?)
+			OR (n.audience = 'NEW_USERS' AND ? = true)  -- 👈 Só para calouros
+			OR (n.audience = 'VETERANS' AND ? = false)  -- 👈 Só para veteranos
 		)
 		ORDER BY n.created_at DESC
-	`, userID, `"`+userID+`"`).Scan(&notifications)
+	`, userID, `"`+userID+`"`, isNewUser, isNewUser).Scan(&notifications)
 
 	if notifications == nil {
 		notifications = []models.Notification{} // Para não devolver null pro Front-end

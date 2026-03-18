@@ -7,10 +7,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// USER
+// USER - O Perfil Completo "De Milhões"
 type User struct {
-	ID               uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FullName         string         `gorm:"not null" json:"full_name"`
+	ID       uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	FullName string    `gorm:"not null" json:"full_name"`
+
+	// 👇 NOVOS CAMPOS DE IDENTIDADE E PERSONALIZAÇÃO
+	Nickname         string     `gorm:"size:50" json:"nickname"`                 // Nome fictício
+	Bio              string     `gorm:"type:text" json:"bio"`                    // Descrição/Sobre mim
+	BirthDate        *time.Time `json:"birth_date"`                              // Data de nascimento
+	Gender           string     `gorm:"size:20" json:"gender"`                   // Gênero
+	BannerPic        string     `json:"banner_picture_url"`                      // Fundo Retangular (Suporta GIF)
+	IsProfilePrivate bool       `gorm:"default:false" json:"is_profile_private"` // Ocultar perfil?
+
+	// CAMPOS ORIGINAIS MANTIDOS
 	Email            string         `gorm:"unique;not null" json:"email"`
 	CPF              string         `gorm:"unique;not null" json:"cpf"`
 	Password         string         `gorm:"not null" json:"-"`
@@ -25,6 +35,9 @@ type User struct {
 	CurrentStreak    int            `json:"current_streak" gorm:"default:0"`
 	HighestStreak    int            `json:"highest_streak" gorm:"default:0"`
 	DevicePlatform   string         `json:"device_platform"`
+
+	Title    string `gorm:"size:50" json:"title"`     // ex: "DESENVOLVEDOR"
+	Location string `gorm:"size:100" json:"location"` // ex: "Brasil"
 }
 
 // SPACE
@@ -109,7 +122,8 @@ type Notebook struct {
 	Guides []Guide `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"guides"`
 	Pages  []Page  `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"` // Páginas soltas (sem guia)
 
-	OwnerName string `gorm:"-" json:"owner_name"`
+	OwnerName   string `gorm:"-" json:"owner_name"`
+	UpdaterName string `gorm:"-" json:"updater_name"` // 👈 ADICIONE ISSO
 
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
@@ -132,7 +146,8 @@ type Guide struct {
 	ColorHex    string `gorm:"size:7" json:"color_hex"`
 	Order       int    `json:"order"`
 
-	OwnerName string `gorm:"-" json:"owner_name"` // Campo Virtual
+	OwnerName   string `gorm:"-" json:"owner_name"`   // Campo Virtual
+	UpdaterName string `gorm:"-" json:"updater_name"` // 👈 ADICIONE ISSO
 
 	// Relacionamentos em Cascata
 	Pages     []Page  `gorm:"foreignKey:GuideID;constraint:OnDelete:CASCADE" json:"pages"`
@@ -156,7 +171,8 @@ type Page struct {
 	Content string `gorm:"type:jsonb" json:"content"`
 	Order   int    `json:"order"` // Para numerar as páginas na lista
 
-	OwnerName string `gorm:"-" json:"owner_name"`
+	OwnerName   string `gorm:"-" json:"owner_name"`
+	UpdaterName string `gorm:"-" json:"updater_name"` // 👈 ADICIONE ISSO
 
 	// 👇 AUDITORIA (A ASSINATURA DIGITAL)
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`

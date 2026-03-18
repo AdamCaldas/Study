@@ -72,6 +72,7 @@ func main() {
 		// ------------------------------------------------------
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
+		protected.PUT("/me/password", users.UpdatePassword) // 👈 Coloca essa linha aqui!
 		protected.DELETE("/me", users.DeleteMyAccount)
 
 		// ------------------------------------------------------

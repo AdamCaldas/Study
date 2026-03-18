@@ -7,6 +7,7 @@ import (
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // GetSpaceDashboard - Retorna o Raio-X ABSOLUTO do Space (TUDO) para o Front-end
@@ -93,49 +94,54 @@ func GetSpaceDashboard(c *gin.Context) {
 		Find(&notebooks)
 
 	// ---------------------------------------------------------
-	// 🧙‍♂️ MÁGICA: Preencher o owner_name de TODA a árvore de pastas
 	// ---------------------------------------------------------
-	for i := range notebooks {
-		// 1. Dono do CADERNO
-		var notebookAuthor string
-		database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].CreatedByID).Scan(&notebookAuthor)
-		notebooks[i].OwnerName = notebookAuthor
+	// 🧙‍♂️ MÁGICA DE PERFORMANCE: Mapeando Criadores e Editores
+	// ---------------------------------------------------------
 
-		// 2. Dono das PÁGINAS SOLTAS
+	// 1. Busca todos os usuários do banco de uma vez só e cria um dicionário (Map)
+	var allUsers []models.User
+	database.DB.Select("id, full_name").Find(&allUsers)
+
+	userMap := make(map[uuid.UUID]string)
+	for _, u := range allUsers {
+		userMap[u.ID] = u.FullName
+	}
+
+	// 2. Distribui os nomes na velocidade da luz sem consultar o banco de novo!
+	for i := range notebooks {
+		// Rastreador do CADERNO
+		notebooks[i].OwnerName = userMap[notebooks[i].CreatedByID]
+		notebooks[i].UpdaterName = userMap[notebooks[i].UpdatedByID]
+
+		// Rastreador das PÁGINAS SOLTAS
 		for j := range notebooks[i].Pages {
-			var pageAuthor string
-			database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Pages[j].CreatedByID).Scan(&pageAuthor)
-			notebooks[i].Pages[j].OwnerName = pageAuthor
+			notebooks[i].Pages[j].OwnerName = userMap[notebooks[i].Pages[j].CreatedByID]
+			notebooks[i].Pages[j].UpdaterName = userMap[notebooks[i].Pages[j].UpdatedByID]
 		}
 
-		// 3. Dono das GUIAS (Pastas) e suas páginas
+		// Rastreador das GUIAS (Pastas)
 		for k := range notebooks[i].Guides {
-			var guideAuthor string
-			database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].CreatedByID).Scan(&guideAuthor)
-			notebooks[i].Guides[k].OwnerName = guideAuthor
+			notebooks[i].Guides[k].OwnerName = userMap[notebooks[i].Guides[k].CreatedByID]
+			notebooks[i].Guides[k].UpdaterName = userMap[notebooks[i].Guides[k].UpdatedByID]
 
 			for l := range notebooks[i].Guides[k].Pages {
-				var gPageAuthor string
-				database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].Pages[l].CreatedByID).Scan(&gPageAuthor)
-				notebooks[i].Guides[k].Pages[l].OwnerName = gPageAuthor
+				notebooks[i].Guides[k].Pages[l].OwnerName = userMap[notebooks[i].Guides[k].Pages[l].CreatedByID]
+				notebooks[i].Guides[k].Pages[l].UpdaterName = userMap[notebooks[i].Guides[k].Pages[l].UpdatedByID]
 			}
 
-			// 4. Dono das SUB-GUIAS (Pastas dentro de Pastas) e suas páginas
+			// Rastreador das SUB-GUIAS (Pastas dentro de pastas)
 			for m := range notebooks[i].Guides[k].SubGuides {
-				var subGuideAuthor string
-				database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].SubGuides[m].CreatedByID).Scan(&subGuideAuthor)
-				notebooks[i].Guides[k].SubGuides[m].OwnerName = subGuideAuthor
+				notebooks[i].Guides[k].SubGuides[m].OwnerName = userMap[notebooks[i].Guides[k].SubGuides[m].CreatedByID]
+				notebooks[i].Guides[k].SubGuides[m].UpdaterName = userMap[notebooks[i].Guides[k].SubGuides[m].UpdatedByID]
 
 				for n := range notebooks[i].Guides[k].SubGuides[m].Pages {
-					var sgPageAuthor string
-					database.DB.Table("users").Select("full_name").Where("id = ?", notebooks[i].Guides[k].SubGuides[m].Pages[n].CreatedByID).Scan(&sgPageAuthor)
-					notebooks[i].Guides[k].SubGuides[m].Pages[n].OwnerName = sgPageAuthor
+					notebooks[i].Guides[k].SubGuides[m].Pages[n].OwnerName = userMap[notebooks[i].Guides[k].SubGuides[m].Pages[n].CreatedByID]
+					notebooks[i].Guides[k].SubGuides[m].Pages[n].UpdaterName = userMap[notebooks[i].Guides[k].SubGuides[m].Pages[n].UpdatedByID]
 				}
 			}
 		}
 	}
 	// ---------------------------------------------------------
-
 	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
 	var notebookPermissions []models.NotebookPermission
 	database.DB.Joins("JOIN notebooks ON notebooks.id = notebook_permissions.notebook_id").
