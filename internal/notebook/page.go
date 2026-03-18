@@ -18,6 +18,7 @@ type CreatePageInput struct {
 	Title   string          `json:"title" binding:"required"`
 	Content json.RawMessage `json:"content"`
 	Order   int             `json:"order"`
+	GuideID *uuid.UUID      `json:"guide_id"` // 👈 NOVO: Sabe se vai para dentro de uma pasta
 }
 
 func CreatePage(c *gin.Context) {
@@ -49,6 +50,7 @@ func CreatePage(c *gin.Context) {
 
 	newPage := models.Page{
 		NotebookID:  parsedNotebookID,
+		GuideID:     input.GuideID, // 👈 Se mandar nulo, fica solta. Se mandar ID, entra na pasta.
 		Title:       input.Title,
 		Content:     string(input.Content),
 		Order:       input.Order,
@@ -71,6 +73,7 @@ type UpdatePageInput struct {
 	Title   string                 `json:"title"`
 	Content map[string]interface{} `json:"content"`
 	Order   int                    `json:"order"`
+	GuideID *uuid.UUID             `json:"guide_id"` // 👈 NOVO: Permite arrastar a página de uma pasta pra outra
 }
 
 func UpdatePage(c *gin.Context) {
@@ -101,6 +104,11 @@ func UpdatePage(c *gin.Context) {
 		"title":         input.Title,
 		"order":         input.Order,
 		"updated_by_id": parsedUserID, // ASSINATURA
+	}
+
+	// Permite mudar a página de pasta
+	if input.GuideID != nil {
+		updates["guide_id"] = input.GuideID
 	}
 
 	if len(input.Content) > 0 {

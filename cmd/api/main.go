@@ -156,7 +156,14 @@ func main() {
 		}
 
 		// ------------------------------------------------------
-		// 📄 6. PÁGINAS (Apenas Ações)
+		// 📁 6. GUIAS / PASTAS DO CADERNO (As novas pastas!)
+		// ------------------------------------------------------
+		protected.POST("/notebooks/:notebook_id/guides", notebook.CreateGuide)
+		protected.PUT("/guides/:guide_id", notebook.UpdateGuide)
+		protected.DELETE("/guides/:guide_id", notebook.DeleteGuide)
+
+		// ------------------------------------------------------
+		// 📄 7. PÁGINAS (Apenas Ações)
 		// ------------------------------------------------------
 		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
 		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)

@@ -31,19 +31,22 @@ func getUserID(c *gin.Context) uuid.UUID {
 // Verifica se o usuário pode mexer neste caderno específico
 // ==========================================================
 func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) bool {
+	// 1. É o dono do Space?
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err == nil {
-		return true // É o dono do Space
+	if err := database.DB.Select("id").Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err == nil {
+		return true // Pode tudo
 	}
 
+	// 2. Tem permissão direta no Caderno?
 	var nbPerm models.NotebookPermission
-	if err := database.DB.Where("notebook_id = ? AND user_id = ?", notebookID, userID).First(&nbPerm).Error; err == nil {
-		return nbPerm.AccessLevel == "EDITOR" // Trava Específica
+	if err := database.DB.Select("access_level").Where("notebook_id = ? AND user_id = ?", notebookID, userID).First(&nbPerm).Error; err == nil {
+		return nbPerm.AccessLevel == "EDITOR"
 	}
 
+	// 3. Tem permissão geral de editor no Space?
 	var spPerm models.SpacePermission
-	if err := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&spPerm).Error; err == nil {
-		return spPerm.AccessLevel == "EDITOR" // Trava Geral
+	if err := database.DB.Select("can_create_content").Where("space_id = ? AND user_id = ?", spaceID, userID).First(&spPerm).Error; err == nil {
+		return spPerm.CanCreateContent // Se ele pode criar conteúdo no space, ele pode editar cadernos
 	}
 
 	return false
@@ -64,11 +67,13 @@ func CreateNotebook(c *gin.Context) {
 
 	var space models.Space
 	isOwner := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, parsedUserID).First(&space).Error == nil
-	var permission models.SpacePermission
-	isSpaceEditor := database.DB.Where("space_id = ? AND user_id = ? AND access_level = 'EDITOR'", parsedSpaceID, parsedUserID).First(&permission).Error == nil
 
-	if !isOwner && !isSpaceEditor {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso Negado."})
+	// Verifica a permissão granular nova ("can_create_content")
+	var permission models.SpacePermission
+	canCreate := database.DB.Where("space_id = ? AND user_id = ? AND can_create_content = true", parsedSpaceID, parsedUserID).First(&permission).Error == nil
+
+	if !isOwner && !canCreate {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para criar cadernos neste Space."})
 		return
 	}
 
@@ -140,8 +145,13 @@ func UpdateNotebook(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Caderno atualizado!"})
 }
 
+// ==========================================================
+// 🗑️ DELETE NOTEBOOK
+// ==========================================================
 func DeleteNotebook(c *gin.Context) {
 	notebookID := c.Param("notebook_id")
+
+	// O GORM Cascata vai apagar as Guias e as Páginas sozinhas!
 	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
 		return
