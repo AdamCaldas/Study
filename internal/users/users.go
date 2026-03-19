@@ -30,7 +30,7 @@ func GetMyProfile(c *gin.Context) {
 		return
 	}
 
-	// 1. Busca os dados do Usuário (Nome, Bio, Foto, Banner, XP, Streak, etc)
+	// 1. Busca os dados do Usuário
 	var user models.User
 	if err := database.DB.Where("id = ?", userID).First(&user).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Usuário não encontrado"})
@@ -40,70 +40,95 @@ func GetMyProfile(c *gin.Context) {
 	// ---------------------------------------------------------
 	// 🧙‍♂️ MÁGICA: Calcular Resumo de Desempenho
 	// ---------------------------------------------------------
-
-	// A. Busca as "Habilidades" (Nomes dos Cadernos que o usuário criou)
 	var skills []string
 	database.DB.Table("notebooks").
 		Select("DISTINCT name").
 		Where("created_by_id = ?", userID).
-		Limit(10). // Pega só as top 10 habilidades
+		Limit(10).
 		Scan(&skills)
 
 	if skills == nil {
 		skills = []string{}
 	}
 
-	// B. Contagem total de Cadernos e Páginas Criadas
-	var totalNotebooks int64
-	var totalPages int64
+	var totalNotebooks, totalPages int64
 	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", userID).Count(&totalNotebooks)
 	database.DB.Model(&models.Page{}).Where("created_by_id = ?", userID).Count(&totalPages)
 
-	// C. Busca as "Conquistas Recentes" (Mock para o Front-end montar os ícones)
 	achievements := []gin.H{
 		{"id": 1, "name": "Mestre das Revisões", "icon_url": "url-do-trofeu", "is_unlocked": true},
 		{"id": 2, "name": "Foco Absoluto", "icon_url": "url-do-trofeu", "is_unlocked": true},
 		{"id": 3, "name": "Escritor Ávido", "icon_url": "url-do-trofeu", "is_unlocked": false},
 	}
-	// ---------------------------------------------------------
 
+	// ---------------------------------------------------------
+	// 🌟 NOVO: As Estatísticas (Usage Stats) pedidas pelo Mayan
+	// ---------------------------------------------------------
+	var qtdNotebooks, qtdNotes, qtdCycles int64
+	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", userID).Count(&qtdNotebooks)
+	database.DB.Model(&models.StudyCycle{}).Where("created_by_id = ?", userID).Count(&qtdCycles)
+
+	// Como Notas pertencem ao Space, contamos as notas dentro dos Spaces que ele é dono
+	database.DB.Table("quick_notes").
+		Joins("JOIN spaces ON spaces.id = quick_notes.space_id").
+		Where("spaces.owner_id = ?", userID).
+		Count(&qtdNotes)
+
+	// 🌟 NOVO: Busca de todos os Planos de Estudo do usuário (A Agenda Inteira)
+	var studyPlans []models.StudyPlan
+	database.DB.Table("study_plans").
+		Select("DISTINCT study_plans.*").
+		Joins("JOIN spaces ON spaces.id = study_plans.space_id").
+		Joins("LEFT JOIN space_permissions ON space_permissions.space_id = spaces.id").
+		Where("spaces.owner_id = ? OR space_permissions.user_id = ?", userID, userID).
+		Find(&studyPlans)
+
+	if studyPlans == nil {
+		studyPlans = []models.StudyPlan{}
+	}
+
+	// ---------------------------------------------------------
 	// 2. Busca os Spaces que ele é o DONO
+	// ---------------------------------------------------------
 	var ownedSpaces []models.Space
 	database.DB.Select("id, name, color_hex, category").Where("owner_id = ?", userID).Find(&ownedSpaces)
+	if ownedSpaces == nil {
+		ownedSpaces = []models.Space{}
+	}
 
-	// 3. Busca os Spaces que ele é CONVIDADO
+	// ---------------------------------------------------------
+	// 3. Busca os Spaces que ele é CONVIDADO (🌟 AGORA COM A FOTO DO DONO)
+	// ---------------------------------------------------------
 	var guestSpaces []struct {
-		SpaceID     string `json:"space_id"`
-		Name        string `json:"name"`
-		ColorHex    string `json:"color_hex"`
-		AccessLevel string `json:"access_level"`
-		OwnerName   string `json:"owner_name"`
-		UpdatedAt   string `json:"updated_at"`
+		SpaceID           string `json:"space_id"`
+		Name              string `json:"name"`
+		ColorHex          string `json:"color_hex"`
+		AccessLevel       string `json:"access_level"`
+		OwnerName         string `json:"owner_name"`
+		ProfilePictureURL string `json:"profile_picture_url"` // 👈 NOVA COLUNA INJETADA
+		UpdatedAt         string `json:"updated_at"`
 	}
 
 	database.DB.Table("spaces").
-		Select("spaces.id as space_id, spaces.name, spaces.color_hex, space_permissions.access_level, users.full_name as owner_name, spaces.updated_at").
+		Select("spaces.id as space_id, spaces.name, spaces.color_hex, space_permissions.access_level, users.full_name as owner_name, users.profile_pic as profile_picture_url, spaces.updated_at").
 		Joins("join space_permissions on space_permissions.space_id = spaces.id").
 		Joins("join users on users.id = spaces.owner_id").
 		Where("space_permissions.user_id = ?", userID).
 		Scan(&guestSpaces)
 
-	// Garante arrays vazios no JSON
 	if guestSpaces == nil {
 		guestSpaces = []struct {
-			SpaceID     string `json:"space_id"`
-			Name        string `json:"name"`
-			ColorHex    string `json:"color_hex"`
-			AccessLevel string `json:"access_level"`
-			OwnerName   string `json:"owner_name"`
-			UpdatedAt   string `json:"updated_at"`
+			SpaceID           string `json:"space_id"`
+			Name              string `json:"name"`
+			ColorHex          string `json:"color_hex"`
+			AccessLevel       string `json:"access_level"`
+			OwnerName         string `json:"owner_name"`
+			ProfilePictureURL string `json:"profile_picture_url"`
+			UpdatedAt         string `json:"updated_at"`
 		}{}
 	}
-	if ownedSpaces == nil {
-		ownedSpaces = []models.Space{}
-	}
 
-	// 4. Monta o JSON de Resposta
+	// 4. Monta o JSON GIGANTE de Resposta com tudo que o Front-end pediu
 	c.JSON(http.StatusOK, gin.H{
 		"profile": user,
 		"stats": gin.H{
@@ -114,8 +139,14 @@ func GetMyProfile(c *gin.Context) {
 			"total_notebooks":     totalNotebooks,
 			"total_pages":         totalPages,
 		},
+		"usage_stats": gin.H{ // 👈 AS CONTAGENS AQUI
+			"qtd_notebooks": qtdNotebooks,
+			"qtd_notes":     qtdNotes,
+			"qtd_cycles":    qtdCycles,
+		},
+		"study_plans":  studyPlans, // 👈 A AGENDA COMPLETA AQUI
 		"owned_spaces": ownedSpaces,
-		"guest_spaces": guestSpaces,
+		"guest_spaces": guestSpaces, // 👈 OS CONVITES COM FOTO AQUI
 	})
 }
 
