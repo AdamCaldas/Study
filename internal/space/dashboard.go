@@ -14,6 +14,18 @@ import (
 func GetSpaceDashboard(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
+	// =========================================================
+	// 🌟 0. PEGA O ID DO USUÁRIO LOGADO (Para as métricas globais)
+	// =========================================================
+	userIDInterface, _ := c.Get("userID")
+	var loggedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		loggedUserID = v
+	case string:
+		loggedUserID, _ = uuid.Parse(v)
+	}
+
 	// 1. Dados principais do Space
 	var space models.Space
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
@@ -94,7 +106,6 @@ func GetSpaceDashboard(c *gin.Context) {
 		Find(&notebooks)
 
 	// ---------------------------------------------------------
-	// ---------------------------------------------------------
 	// 🧙‍♂️ MÁGICA DE PERFORMANCE: Mapeando Criadores e Editores
 	// ---------------------------------------------------------
 
@@ -141,7 +152,7 @@ func GetSpaceDashboard(c *gin.Context) {
 			}
 		}
 	}
-	// ---------------------------------------------------------
+
 	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
 	var notebookPermissions []models.NotebookPermission
 	database.DB.Joins("JOIN notebooks ON notebooks.id = notebook_permissions.notebook_id").
@@ -164,7 +175,7 @@ func GetSpaceDashboard(c *gin.Context) {
 		}
 	}
 
-	// 6. Planos de Estudo (Agenda Completa)
+	// 6. Planos de Estudo (Agenda Completa DO SPACE)
 	var studyPlans []models.StudyPlan
 	database.DB.Where("space_id = ?", spaceID).Find(&studyPlans)
 
@@ -176,6 +187,58 @@ func GetSpaceDashboard(c *gin.Context) {
 	var quizzes []models.Quiz
 	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
 
+	// =========================================================
+	// 🌟 8.5 INJEÇÃO EXTRA: DADOS GLOBAIS DO USUÁRIO LOGADO
+	// =========================================================
+	var qtdNotebooks, qtdNotes, qtdCycles int64
+	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", loggedUserID).Count(&qtdNotebooks)
+	database.DB.Model(&models.StudyCycle{}).Where("created_by_id = ?", loggedUserID).Count(&qtdCycles)
+	database.DB.Table("quick_notes").
+		Joins("JOIN spaces ON spaces.id = quick_notes.space_id").
+		Where("spaces.owner_id = ?", loggedUserID).
+		Count(&qtdNotes)
+
+	var globalStudyPlans []models.StudyPlan
+	database.DB.Table("study_plans").
+		Select("DISTINCT study_plans.*").
+		Joins("JOIN spaces ON spaces.id = study_plans.space_id").
+		Joins("LEFT JOIN space_permissions ON space_permissions.space_id = spaces.id").
+		Where("spaces.owner_id = ? OR space_permissions.user_id = ?", loggedUserID, loggedUserID).
+		Find(&globalStudyPlans)
+
+	if globalStudyPlans == nil {
+		globalStudyPlans = []models.StudyPlan{}
+	}
+
+	var guestSpaces []struct {
+		SpaceID           string `json:"space_id"`
+		Name              string `json:"name"`
+		ColorHex          string `json:"color_hex"`
+		AccessLevel       string `json:"access_level"`
+		OwnerName         string `json:"owner_name"`
+		ProfilePictureURL string `json:"profile_picture_url"`
+		UpdatedAt         string `json:"updated_at"`
+	}
+
+	database.DB.Table("spaces").
+		Select("spaces.id as space_id, spaces.name, spaces.color_hex, space_permissions.access_level, users.full_name as owner_name, users.profile_pic as profile_picture_url, spaces.updated_at").
+		Joins("join space_permissions on space_permissions.space_id = spaces.id").
+		Joins("join users on users.id = spaces.owner_id").
+		Where("space_permissions.user_id = ?", loggedUserID).
+		Scan(&guestSpaces)
+
+	if guestSpaces == nil {
+		guestSpaces = []struct {
+			SpaceID           string `json:"space_id"`
+			Name              string `json:"name"`
+			ColorHex          string `json:"color_hex"`
+			AccessLevel       string `json:"access_level"`
+			OwnerName         string `json:"owner_name"`
+			ProfilePictureURL string `json:"profile_picture_url"`
+			UpdatedAt         string `json:"updated_at"`
+		}{}
+	}
+
 	// 🚀 9. O JSON GIGANTE COM TUDO
 	c.JSON(http.StatusOK, gin.H{
 		"space":                space,
@@ -185,8 +248,17 @@ func GetSpaceDashboard(c *gin.Context) {
 		"notebook_permissions": notebookPermissions,
 		"all_cycles":           cycles,
 		"active_cycle":         activeCycle,
-		"study_plans":          studyPlans,
+		"space_study_plans":    studyPlans, // Agenda apenas do Space
 		"quick_notes":          quickNotes,
 		"quizzes":              quizzes,
+
+		// 👇 DADOS EXTRAS GLOBAIS (Pedido do Mayan)
+		"usage_stats": gin.H{
+			"qtd_notebooks": qtdNotebooks,
+			"qtd_notes":     qtdNotes,
+			"qtd_cycles":    qtdCycles,
+		},
+		"global_study_plans": globalStudyPlans, // Agenda de TODOS os Spaces
+		"guest_spaces":       guestSpaces,      // Convites com foto do dono
 	})
 }
