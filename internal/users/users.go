@@ -262,3 +262,189 @@ func DeleteMyAccount(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Conta excluída com sucesso."})
 }
+
+// ==========================================================
+// 🎓 TRANSFORMAR USUÁRIO EM PROFESSOR (Onboarding B2B)
+// ==========================================================
+func BecomeTeacher(c *gin.Context) {
+	// 1. Pega o ID do usuário logado
+	userIDInterface, _ := c.Get("userID")
+
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação"})
+		return
+	}
+
+	// 2. Cria a estrutura para receber o CNPJ do Front-end
+	var input struct {
+		CNPJ string `json:"cnpj" binding:"required"`
+	}
+
+	// 3. Valida se o Front mandou o JSON certinho
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "O CNPJ é obrigatório para criar uma conta de Professor."})
+		return
+	}
+
+	// 🚧 Dica de Sênior: No futuro, você pode colocar um código aqui que bate
+	// na "BrasilAPI" para conferir se esse CNPJ existe mesmo na Receita Federal.
+	// Por enquanto, vamos só salvar direto.
+
+	// 4. Prepara a atualização no banco de dados
+	updates := map[string]interface{}{
+		"account_type": "TEACHER", // 👈 A mágica acontece aqui!
+		"cnpj":         input.CNPJ,
+	}
+
+	// 5. Salva no banco de dados
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a conta para Professor."})
+		return
+	}
+
+	// 6. Devolve a resposta de Sucesso pro Mayan
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "Parabéns! Agora você é um Professor no StudFy.",
+		"account_type": "TEACHER",
+		"cnpj":         input.CNPJ,
+	})
+}
+
+// ==========================================================
+// 🎓 VER PERFIL PÚBLICO DO PROFESSOR (A Vitrine)
+// ==========================================================
+func GetTeacherProfile(c *gin.Context) {
+	// 1. Quem está acessando? (Para o botão de seguir)
+	viewerIDInterface, _ := c.Get("userID")
+	var viewerID uuid.UUID
+	switch v := viewerIDInterface.(type) {
+	case uuid.UUID:
+		viewerID = v
+	case string:
+		viewerID, _ = uuid.Parse(v)
+	}
+
+	// 2. ID do professor na URL
+	teacherIDStr := c.Param("id")
+	teacherID, err := uuid.Parse(teacherIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do professor inválido."})
+		return
+	}
+
+	// 3. Busca os dados públicos do Professor (SEGURANÇA: Nada de dados sensíveis aqui!)
+	var teacher models.User
+	if err := database.DB.Select("id, full_name, nickname, bio, profile_pic, banner_pic, title, location").
+		Where("id = ? AND account_type = 'TEACHER'", teacherID).
+		First(&teacher).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Professor não encontrado."})
+		return
+	}
+
+	// 4. Conta quantos seguidores ele tem
+	var followerCount int64
+	database.DB.Model(&models.Follower{}).Where("following_id = ?", teacherID).Count(&followerCount)
+
+	// 5. Verifica se o aluno logado já segue esse professor
+	var isFollowing bool
+	var follow models.Follower
+	if err := database.DB.Where("follower_id = ? AND following_id = ?", viewerID, teacherID).First(&follow).Error; err == nil {
+		isFollowing = true
+	}
+
+	// 6. Busca os Spaces (Salas de Aula) que ele deixou como PÚBLICOS
+	var publicSpaces []models.Space
+	database.DB.Select("id, name, description, color_hex, category").
+		Where("owner_id = ? AND visibility = 'public'", teacherID).
+		Find(&publicSpaces)
+
+	if publicSpaces == nil {
+		publicSpaces = []models.Space{}
+	}
+
+	// 7. Monta o JSON Mastigadinho para o Mayan
+	c.JSON(http.StatusOK, gin.H{
+		"teacher": gin.H{
+			"id":                  teacher.ID,
+			"full_name":           teacher.FullName,
+			"nickname":            teacher.Nickname,
+			"bio":                 teacher.Bio,
+			"profile_picture_url": teacher.ProfilePic,
+			"banner_picture_url":  teacher.BannerPic,
+			"title":               teacher.Title,
+			"location":            teacher.Location,
+			"follower_count":      followerCount,
+			"is_following":        isFollowing, // 👈 Pro Front renderizar o botão certo
+		},
+		"public_spaces": publicSpaces,
+	})
+}
+
+// ==========================================================
+// 🌟 SEGUIR UM PROFESSOR
+// ==========================================================
+func FollowTeacher(c *gin.Context) {
+	// 1. Quem está clicando no botão de seguir?
+	followerIDInterface, _ := c.Get("userID")
+	followerID, _ := uuid.Parse(followerIDInterface.(string))
+
+	// 2. Quem ele quer seguir? (Vem na URL: /teachers/:id/follow)
+	teacherIDStr := c.Param("id")
+	teacherID, err := uuid.Parse(teacherIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do professor inválido."})
+		return
+	}
+
+	// 3. Regra de Ouro: Não pode seguir a si mesmo
+	if followerID == teacherID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Você não pode seguir a si mesmo."})
+		return
+	}
+
+	// 4. Regra: Só pode seguir se o alvo for um Professor
+	var teacher models.User
+	if err := database.DB.Where("id = ? AND account_type = 'TEACHER'", teacherID).First(&teacher).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Professor não encontrado ou usuário não é um professor."})
+		return
+	}
+
+	// 5. Verifica se já segue (para não duplicar no banco)
+	var existingFollow models.Follower
+	if err := database.DB.Where("follower_id = ? AND following_id = ?", followerID, teacherID).First(&existingFollow).Error; err == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "Você já segue este professor."})
+		return
+	}
+
+	// 6. Cria a conexão no banco!
+	newFollow := models.Follower{
+		FollowerID:  followerID,
+		FollowingID: teacherID,
+	}
+	database.DB.Create(&newFollow)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Você agora está seguindo " + teacher.FullName})
+}
+
+// ==========================================================
+// 💔 DEIXAR DE SEGUIR UM PROFESSOR
+// ==========================================================
+func UnfollowTeacher(c *gin.Context) {
+	followerIDInterface, _ := c.Get("userID")
+	followerID, _ := uuid.Parse(followerIDInterface.(string))
+	teacherID, _ := uuid.Parse(c.Param("id"))
+
+	// Deleta a conexão do banco
+	if err := database.DB.Where("follower_id = ? AND following_id = ?", followerID, teacherID).Delete(&models.Follower{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deixar de seguir."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Você deixou de seguir este professor."})
+}

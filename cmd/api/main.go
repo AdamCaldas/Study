@@ -72,14 +72,26 @@ func main() {
 		// ------------------------------------------------------
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
-		protected.PUT("/me/password", users.UpdatePassword) // 👈 Coloca essa linha aqui!
+		protected.PUT("/me/password", users.UpdatePassword)
 		protected.DELETE("/me", users.DeleteMyAccount)
+		protected.POST("/me/become-teacher", users.BecomeTeacher)
+
+		// 🏦 FASE 3: BANCO DE QUESTÕES
+		protected.GET("/me/question-bank", study.GetMyQuestionBank)
+		protected.POST("/me/question-bank", study.SaveToQuestionBank)
 
 		// ------------------------------------------------------
 		// 🔔 1.5 NOTIFICAÇÕES DO ALUNO
 		// ------------------------------------------------------
 		protected.GET("/notifications", admin.GetMyNotifications)
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
+
+		// ------------------------------------------------------
+		// 🎓 1.8 VITRINE E PROFESSORES
+		// ------------------------------------------------------
+		protected.POST("/teachers/:id/follow", users.FollowTeacher)
+		protected.DELETE("/teachers/:id/follow", users.UnfollowTeacher)
+		protected.GET("/teachers/:id", users.GetTeacherProfile)
 
 		// ------------------------------------------------------
 		// 🎮 2. GAMIFICAÇÃO E FOCO
@@ -96,6 +108,9 @@ func main() {
 
 		protected.GET("/spaces/code/:code", space.GetSpaceByCode) // Pre-view do convite
 		protected.POST("/spaces/join", space.RequestSpaceAccess)  // Solicitar acesso (Sala de Espera)
+
+		// 📷 NOVO: ALUNO BATE O PONTO LENDO O QR CODE
+		protected.POST("/attendance/check-in", space.RegisterAttendance)
 
 		// ------------------------------------------------------
 		// 📊 4. SUPER DASHBOARD (O "Todas as Informações")
@@ -127,6 +142,12 @@ func main() {
 			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)
 			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator)
 
+			// ======================================================
+			// 🕵️ DOSSIÊ DO ALUNO (Notas Privadas do Professor - FASE 2)
+			// ======================================================
+			spaceRoutes.GET("/dossier/:student_id", space.GetOrUpdateStudentDossier)
+			spaceRoutes.PUT("/dossier/:student_id", space.GetOrUpdateStudentDossier)
+
 			// 👉 Cadernos
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
@@ -154,6 +175,57 @@ func main() {
 			// 👉 Revisões e Quizzes
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
+
+			// ======================================================
+			// ⚔️ FASE 4: AVALIAÇÃO E ANTI-COLA
+			// ======================================================
+			spaceRoutes.POST("/quizzes/:quiz_id/submit", study.SubmitQuiz)
+			spaceRoutes.POST("/quizzes/:quiz_id/cheat-alert", study.ReportCheatAttempt)
+			spaceRoutes.PUT("/quizzes/results/:result_id/grade", study.GradeQuizManual)
+			spaceRoutes.POST("/certificate", study.ClaimCertificate)
+
+			// ======================================================
+			// 💬 FASE 5: FÓRUM E PLANTÃO DE DÚVIDAS
+			// ======================================================
+			spaceRoutes.POST("/pages/:page_id/doubts", space.CreatePageDoubt)
+			spaceRoutes.GET("/doubts", space.ListSpaceDoubts)
+			spaceRoutes.PUT("/doubts/:doubt_id/answer", space.AnswerPageDoubt)
+
+			// 📢 NOVO: O PASSO 2 - MEGAFONE
+			spaceRoutes.POST("/megafone", space.SendMegaphoneMessage)
+
+			// 📷 NOVO: O PASSO 3 - GERAR QR CODE DE PRESENÇA
+			spaceRoutes.POST("/attendance", space.GenerateAttendanceQR)
+
+			// ======================================================
+			// ⚡ FASE 3: MISSÕES RELÂMPAGO
+			// ======================================================
+			spaceRoutes.POST("/missions", gamification.CreateFlashMission)
+			spaceRoutes.GET("/missions", gamification.GetActiveMissions)
+			spaceRoutes.POST("/missions/:mission_id/complete", gamification.CompleteFlashMission)
+
+			// ======================================================
+			// 🏆 FASE 6: CULTURA DA TURMA E EMBLEMAS
+			// ======================================================
+			spaceRoutes.POST("/badges", gamification.CreateBadge)
+			spaceRoutes.POST("/badges/:badge_id/award/:student_id", gamification.AwardBadge)
+
+			// 🏆 NOVO: PASSO 2 - RANKING CONTROLADO
+			spaceRoutes.PATCH("/ranking/toggle", gamification.ToggleSpaceRanking)
+			spaceRoutes.GET("/ranking", gamification.GetSpaceRanking)
+
+			// 🎮 NOVO: PASSO 3 - MODO ARENA (KAHOOT)
+			spaceRoutes.GET("/arena/live", gamification.JoinArenaMode)
+
+			// 🧠 FASE 7: PAINEL DO DIRETOR (ANALYTICS B2B)
+			// ======================================================
+			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
+
+			// 🎓 NOVO: O GRAND FINALE - DOWNLOAD DO DIÁRIO
+			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
+
+			// 🤖 NOVO: PASSO 2 - CRIAR AUTOMAÇÃO
+			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
 		}
 
 		// ------------------------------------------------------

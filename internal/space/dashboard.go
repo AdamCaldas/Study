@@ -2,6 +2,7 @@ package space
 
 import (
 	"net/http"
+	"time"
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -15,7 +16,7 @@ func GetSpaceDashboard(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
 	// =========================================================
-	// 🌟 0. PEGA O ID DO USUÁRIO LOGADO (Para as métricas globais)
+	// 🌟 0. PEGA O ID DO USUÁRIO LOGADO (Para métricas e travas)
 	// =========================================================
 	userIDInterface, _ := c.Get("userID")
 	var loggedUserID uuid.UUID
@@ -37,7 +38,7 @@ func GetSpaceDashboard(c *gin.Context) {
 	var owner models.User
 	database.DB.Select("id, full_name, email, profile_pic").Where("id = ?", space.OwnerID).First(&owner)
 
-	// 🌟 3. BUSCA OS COLABORADORES (Agora com TODAS as permissões granulares!)
+	// 🌟 3. BUSCA OS COLABORADORES (Com todas as permissões granulares)
 	var collaborators []struct {
 		UserID            string `json:"user_id"`
 		FullName          string `json:"full_name"`
@@ -73,7 +74,6 @@ func GetSpaceDashboard(c *gin.Context) {
 		Scan(&collaborators)
 
 	if collaborators == nil {
-		// Mantém o array vazio para o Front não quebrar
 		collaborators = []struct {
 			UserID            string `json:"user_id"`
 			FullName          string `json:"full_name"`
@@ -108,8 +108,6 @@ func GetSpaceDashboard(c *gin.Context) {
 	// ---------------------------------------------------------
 	// 🧙‍♂️ MÁGICA DE PERFORMANCE: Mapeando Criadores e Editores
 	// ---------------------------------------------------------
-
-	// 1. Busca todos os usuários do banco de uma vez só e cria um dicionário (Map)
 	var allUsers []models.User
 	database.DB.Select("id, full_name").Find(&allUsers)
 
@@ -118,19 +116,15 @@ func GetSpaceDashboard(c *gin.Context) {
 		userMap[u.ID] = u.FullName
 	}
 
-	// 2. Distribui os nomes na velocidade da luz sem consultar o banco de novo!
 	for i := range notebooks {
-		// Rastreador do CADERNO
 		notebooks[i].OwnerName = userMap[notebooks[i].CreatedByID]
 		notebooks[i].UpdaterName = userMap[notebooks[i].UpdatedByID]
 
-		// Rastreador das PÁGINAS SOLTAS
 		for j := range notebooks[i].Pages {
 			notebooks[i].Pages[j].OwnerName = userMap[notebooks[i].Pages[j].CreatedByID]
 			notebooks[i].Pages[j].UpdaterName = userMap[notebooks[i].Pages[j].UpdatedByID]
 		}
 
-		// Rastreador das GUIAS (Pastas)
 		for k := range notebooks[i].Guides {
 			notebooks[i].Guides[k].OwnerName = userMap[notebooks[i].Guides[k].CreatedByID]
 			notebooks[i].Guides[k].UpdaterName = userMap[notebooks[i].Guides[k].UpdatedByID]
@@ -140,7 +134,6 @@ func GetSpaceDashboard(c *gin.Context) {
 				notebooks[i].Guides[k].Pages[l].UpdaterName = userMap[notebooks[i].Guides[k].Pages[l].UpdatedByID]
 			}
 
-			// Rastreador das SUB-GUIAS (Pastas dentro de pastas)
 			for m := range notebooks[i].Guides[k].SubGuides {
 				notebooks[i].Guides[k].SubGuides[m].OwnerName = userMap[notebooks[i].Guides[k].SubGuides[m].CreatedByID]
 				notebooks[i].Guides[k].SubGuides[m].UpdaterName = userMap[notebooks[i].Guides[k].SubGuides[m].UpdatedByID]
@@ -153,7 +146,7 @@ func GetSpaceDashboard(c *gin.Context) {
 		}
 	}
 
-	// 🔐 4.5 NOVA TABELA: PERMISSÕES GRANULARES DOS CADERNOS
+	// 🔐 4.5 PERMISSÕES GRANULARES DOS CADERNOS
 	var notebookPermissions []models.NotebookPermission
 	database.DB.Joins("JOIN notebooks ON notebooks.id = notebook_permissions.notebook_id").
 		Where("notebooks.space_id = ?", spaceID).
@@ -186,6 +179,46 @@ func GetSpaceDashboard(c *gin.Context) {
 	// 8. Quizzes / Simulados COM AS PERGUNTAS
 	var quizzes []models.Quiz
 	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
+
+	// =========================================================
+	// ⏳ FASE 3: TIME-RELEASE (CADEADO TEMPORAL DA SALA DE AULA)
+	// =========================================================
+	now := time.Now()
+
+	// 1. Descobre se quem está acessando é o Professor/Monitor ou um Aluno comum
+	isTeacherOrMonitor := (space.OwnerID == loggedUserID)
+	if !isTeacherOrMonitor {
+		var perm models.SpacePermission
+		database.DB.Where("space_id = ? AND user_id = ?", space.ID, loggedUserID).First(&perm)
+		if perm.AccessLevel == "EDITOR" || perm.AccessLevel == "MONITOR" {
+			isTeacherOrMonitor = true
+		}
+	}
+
+	// 2. Trava os Cadernos do Futuro
+	for i := range notebooks {
+		if notebooks[i].UnlockAt != nil && notebooks[i].UnlockAt.After(now) {
+			notebooks[i].IsLocked = true // Avisa o Front para desenhar um cadeado cinza
+
+			// 🛡️ SEGURANÇA: Se for ALUNO, nós esvaziamos as páginas para ele não roubar pelo JSON!
+			// Se for o Professor, a gente manda o conteúdo normal para ele poder revisar.
+			if !isTeacherOrMonitor {
+				notebooks[i].Pages = []models.Page{}
+				notebooks[i].Guides = []models.Guide{}
+			}
+		}
+	}
+
+	// 3. Trava os Simulados/Quizzes do Futuro
+	for i := range quizzes {
+		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
+			quizzes[i].IsLocked = true
+
+			if !isTeacherOrMonitor {
+				quizzes[i].Questions = []models.QuizQuestion{}
+			}
+		}
+	}
 
 	// =========================================================
 	// 🌟 8.5 INJEÇÃO EXTRA: DADOS GLOBAIS DO USUÁRIO LOGADO
@@ -248,17 +281,17 @@ func GetSpaceDashboard(c *gin.Context) {
 		"notebook_permissions": notebookPermissions,
 		"all_cycles":           cycles,
 		"active_cycle":         activeCycle,
-		"space_study_plans":    studyPlans, // Agenda apenas do Space
+		"space_study_plans":    studyPlans,
 		"quick_notes":          quickNotes,
 		"quizzes":              quizzes,
 
-		// 👇 DADOS EXTRAS GLOBAIS (Pedido do Mayan)
+		// 👇 DADOS EXTRAS GLOBAIS
 		"usage_stats": gin.H{
 			"qtd_notebooks": qtdNotebooks,
 			"qtd_notes":     qtdNotes,
 			"qtd_cycles":    qtdCycles,
 		},
-		"global_study_plans": globalStudyPlans, // Agenda de TODOS os Spaces
-		"guest_spaces":       guestSpaces,      // Convites com foto do dono
+		"global_study_plans": globalStudyPlans,
+		"guest_spaces":       guestSpaces,
 	})
 }

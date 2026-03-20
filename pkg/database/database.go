@@ -71,7 +71,23 @@ func ConnectDB() {
 		&models.NotificationRead{},   // Controle de Lidos do Sino
 		&models.NotebookPermission{}, // Permissões de caderno
 		&models.GamificationRule{},   // Regras de XP
-		&models.Guide{},              // 👈 ADICIONE A TABAELA DE GUIAS AQUI!
+		&models.Guide{},              // Guias dos Cadernos
+
+		// ==========================================
+		// 👇 NOVAS TABELAS DAS FASES 1 A 7 👇
+		// ==========================================
+		&models.Follower{},          // Fase 1: Seguidores do Professor
+		&models.StudentDossier{},    // Fase 2: Notas Ocultas do Dossiê
+		&models.QuestionBankItem{},  // Fase 3: Banco de Questões Global
+		&models.FlashMission{},      // Fase 3: Missões Relâmpago
+		&models.MissionCompletion{}, // Fase 3: Controle de quem completou a missão
+		&models.Certificate{},       // Fase 4: Certificado de Conclusão (Diploma)
+		&models.PageDoubt{},         // Fase 5: Fórum e Plantão de Dúvidas
+		&models.AttendanceSession{}, // Fase 5: QR Code (Sessão aberta no Telão)
+		&models.AttendanceRecord{},  // Fase 5: QR Code (Lista de Presença do Aluno)
+		&models.Badge{},             // Fase 6: Emblemas (Badges) criados pelo prof
+		&models.UserBadge{},         // Fase 6: Emblemas ganhos pelo aluno
+		&models.AutomationRule{},    // Fase 7: Regras do Robô de Recuperação
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)

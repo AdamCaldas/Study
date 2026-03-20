@@ -51,7 +51,7 @@ func RequestSpaceAccess(c *gin.Context) {
 
 	var existingRequest models.SpaceJoinRequest
 	if err := database.DB.Where("space_id = ? AND user_id = ? AND status = 'pending'", space.ID, parsedUserID).First(&existingRequest).Error; err == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Você já enviou uma solicitação. Aguarde o dono aprovar!"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Você já enviou uma solicitação. Aguarde aprovação!"})
 		return
 	}
 
@@ -128,7 +128,7 @@ func RespondSpaceRequest(c *gin.Context) {
 			return
 		}
 
-		if input.AccessLevel != "EDITOR" {
+		if input.AccessLevel != "EDITOR" && input.AccessLevel != "MONITOR" {
 			input.AccessLevel = "VIEWER"
 		}
 
@@ -165,15 +165,40 @@ func RespondSpaceRequest(c *gin.Context) {
 }
 
 // ==========================================================
-// 4️⃣ Dono gera/pega o código de compartilhamento
+// 4️⃣ Gerar/Pegar o código de compartilhamento (🔒 COM TRAVA DE CLASSROOM)
 // ==========================================================
 func ShareSpace(c *gin.Context) {
 	spaceID := c.Param("space_id")
+	userIDInterface, _ := c.Get("userID")
 
+	var loggedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		loggedUserID = v
+	case string:
+		loggedUserID, _ = uuid.Parse(v)
+	}
+
+	// Busca o Space para ver se é Sala de Aula ou Normal
 	var space models.Space
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
 		return
+	}
+
+	// 🔒 FASE 2: MONOPÓLIO DE CONVITES (SÓ PARA CLASSROOMS)
+	if space.IsClassroom {
+		// Se quem tá pedindo não for o Dono, a gente tem que checar se ele é MONITOR
+		if space.OwnerID != loggedUserID {
+			var perm models.SpacePermission
+			database.DB.Where("space_id = ? AND user_id = ?", space.ID, loggedUserID).First(&perm)
+
+			// Se for um Classroom e o cara não for Monitor, toma Block!
+			if perm.AccessLevel != "MONITOR" {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Esta é uma Sala de Aula. Apenas o Professor e os Monitores podem gerar links de convite."})
+				return
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -183,14 +208,14 @@ func ShareSpace(c *gin.Context) {
 }
 
 // ==========================================================
-// 5️⃣ Atualiza Nível de Acesso + Checkboxes Granulares (A sua Tela!)
+// 5️⃣ Atualiza Nível de Acesso + Checkboxes Granulares
 // ==========================================================
 func UpdateCollaborator(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	userIDToUpdate := c.Param("user_id")
 
 	var input struct {
-		AccessLevel       string `json:"access_level" binding:"required"` // "VIEWER", "EDITOR" ou "CUSTOM"
+		AccessLevel       string `json:"access_level" binding:"required"` // "VIEWER", "EDITOR", "MONITOR" ou "CUSTOM"
 		CanEditSpaceInfo  bool   `json:"can_edit_space_info"`
 		CanEditSpaceColor bool   `json:"can_edit_space_color"`
 		CanCreateContent  bool   `json:"can_create_content"`

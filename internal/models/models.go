@@ -23,6 +23,7 @@ type User struct {
 	// CAMPOS ORIGINAIS MANTIDOS
 	Email            string         `gorm:"unique;not null" json:"email"`
 	CPF              string         `gorm:"unique;not null" json:"cpf"`
+	CNPJ             string         `gorm:"unique;default:null" json:"cnpj"`
 	Password         string         `gorm:"not null" json:"-"`
 	ProfilePic       string         `json:"profile_picture_url"`
 	SubscriptionType string         `gorm:"default:'FREE_TRIAL'" json:"subscription_type"`
@@ -36,22 +37,25 @@ type User struct {
 	HighestStreak    int            `json:"highest_streak" gorm:"default:0"`
 	DevicePlatform   string         `json:"device_platform"`
 
-	Title    string `gorm:"size:50" json:"title"`     // ex: "DESENVOLVEDOR"
-	Location string `gorm:"size:100" json:"location"` // ex: "Brasil"
+	Title         string `gorm:"size:50" json:"title"`     // ex: "DESENVOLVEDOR"
+	Location      string `gorm:"size:100" json:"location"` // ex: "Brasil"
+	FollowerCount int64  `gorm:"-" json:"follower_count"`  // 👈 ADICIONE ISSO
 }
 
 // SPACE
 type Space struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	OwnerID     uuid.UUID `gorm:"type:uuid;index" json:"owner_id"`
-	Name        string    `gorm:"size:100;not null" json:"name"`
-	Description string    `json:"description"`
-	ColorHex    string    `gorm:"size:7;default:'#FFFFFF'" json:"color_hex"`
-	Category    string    `json:"category"`                       // study | course
-	Status      string    `gorm:"default:'active'" json:"status"` // active | inactive
-	Slug        string    `gorm:"uniqueIndex" json:"slug"`
-	ShareCode   string    `gorm:"uniqueIndex" json:"share_code"`
-	Visibility  string    `gorm:"default:'private'" json:"visibility"` // public | private
+	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	OwnerID         uuid.UUID `gorm:"type:uuid;index" json:"owner_id"`
+	Name            string    `gorm:"size:100;not null" json:"name"`
+	Description     string    `json:"description"`
+	ColorHex        string    `gorm:"size:7;default:'#FFFFFF'" json:"color_hex"`
+	Category        string    `json:"category"`                       // study | course
+	Status          string    `gorm:"default:'active'" json:"status"` // active | inactive
+	Slug            string    `gorm:"uniqueIndex" json:"slug"`
+	ShareCode       string    `gorm:"uniqueIndex" json:"share_code"`
+	Visibility      string    `gorm:"default:'private'" json:"visibility"` // public | private
+	IsClassroom     bool      `gorm:"default:false" json:"is_classroom"`
+	IsRankingActive bool      `gorm:"default:true" json:"is_ranking_active"`
 
 	// Permissões e Configurações
 	AllowCollaborators bool `gorm:"default:true" json:"allow_collaborators"`
@@ -117,6 +121,10 @@ type Notebook struct {
 	SpaceID  uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	Name     string    `gorm:"size:100;not null" json:"name"`
 	ColorHex string    `gorm:"size:7" json:"color_hex"`
+
+	// 👇 FASE 3: AGENDAMENTO DE CONTEÚDO
+	UnlockAt *time.Time `json:"unlock_at"`          // Quando vai ser liberado (Ponteiro permite nulo)
+	IsLocked bool       `gorm:"-" json:"is_locked"` // Campo Virtual: O Backend avisa se ainda está trancado
 
 	// 👇 NOVOS RELACIONAMENTOS
 	Guides []Guide `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"guides"`
@@ -287,6 +295,9 @@ type Quiz struct {
 	Description string         `json:"description"`
 	Questions   []QuizQuestion `gorm:"foreignKey:QuizID;constraint:OnDelete:CASCADE" json:"questions"`
 	CreatedAt   time.Time      `json:"created_at"`
+	// 👇 FASE 3: AGENDAMENTO DE CONTEÚDO
+	UnlockAt *time.Time `json:"unlock_at"`
+	IsLocked bool       `gorm:"-" json:"is_locked"`
 }
 
 // QUIZ QUESTION (As perguntas da prova)
@@ -303,6 +314,7 @@ type QuizQuestion struct {
 // QUIZ / SIMULADOS (Para relatórios de notas e gargalos)
 type QuizResult struct {
 	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	QuizID         uuid.UUID `gorm:"type:uuid;index;not null" json:"quiz_id"` // 👈 ADICIONE ISSO AQUI! (CRÍTICO)
 	UserID         uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
 	SpaceID        uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	Score          float64   `json:"score"`
@@ -385,4 +397,158 @@ type NotificationRead struct {
 type PageTag struct {
 	Name     string `json:"name"`
 	ColorHex string `json:"color_hex"`
+}
+
+// ==========================================================
+// 🤝 REDE SOCIAL: SISTEMA DE SEGUIDORES
+// ==========================================================
+type Follower struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	FollowerID  uuid.UUID `gorm:"type:uuid;index;not null" json:"follower_id"`  // Quem apertou o botão de seguir (Aluno)
+	FollowingID uuid.UUID `gorm:"type:uuid;index;not null" json:"following_id"` // Quem está sendo seguido (Professor)
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ==========================================================
+// 🕵️ DOSSIÊ DO ALUNO (Notas Privadas do Professor)
+// ==========================================================
+type StudentDossier struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	StudentID uuid.UUID `gorm:"type:uuid;index;not null" json:"student_id"`
+	TeacherID uuid.UUID `gorm:"type:uuid;index;not null" json:"teacher_id"`
+	Content   string    `gorm:"type:text" json:"content"` // O texto que o professor vai digitar
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ==========================================================
+// 🏦 FASE 3: BANCO DE QUESTÕES GLOBAL DO PROFESSOR
+// ==========================================================
+type QuestionBankItem struct {
+	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	TeacherID     uuid.UUID `gorm:"type:uuid;index;not null" json:"teacher_id"`
+	QuestionText  string    `gorm:"type:text;not null" json:"question_text"`
+	QuestionType  string    `gorm:"size:50;not null" json:"question_type"` // "multiple_choice" ou "open_ended"
+	Options       string    `gorm:"type:jsonb" json:"options"`             // Array JSON. Ex: '["A) 2", "B) 4"]'
+	CorrectAnswer string    `gorm:"type:text" json:"correct_answer"`
+	Points        int       `gorm:"default:1" json:"points"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// ==========================================================
+// ⚡ FASE 3: MISSÕES RELÂMPAGO (Quests com Timer)
+// ==========================================================
+type FlashMission struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	TeacherID   uuid.UUID `gorm:"type:uuid;not null" json:"teacher_id"`
+	Title       string    `gorm:"size:255;not null" json:"title"`
+	Description string    `gorm:"type:text" json:"description"`
+	RewardXP    int       `gorm:"default:50" json:"reward_xp"` // Quanto XP o aluno ganha
+	ExpiresAt   time.Time `json:"expires_at"`                  // O Timer! Quando a missão acaba
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Tabela para evitar que o aluno complete a missão duas vezes
+type MissionCompletion struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	MissionID   uuid.UUID `gorm:"type:uuid;index;not null" json:"mission_id"`
+	UserID      uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	CompletedAt time.Time `gorm:"autoCreateTime" json:"completed_at"`
+}
+
+// ==========================================================
+// 🎓 FASE 4: CERTIFICADO DE CONCLUSÃO
+// ==========================================================
+type Certificate struct {
+	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID      uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	UserID       uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	AverageScore float64   `json:"average_score"` // A nota final do aluno no curso
+	IssuedAt     time.Time `gorm:"autoCreateTime" json:"issued_at"`
+}
+
+// ==========================================================
+// 💬 FASE 5: PLANTÃO DE DÚVIDAS (Fórum da Sala de Aula)
+// ==========================================================
+type PageDoubt struct {
+	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"space_id"`
+	PageID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"page_id"`
+	StudentID  uuid.UUID  `gorm:"type:uuid;index;not null" json:"student_id"`
+	Content    string     `gorm:"type:text;not null" json:"content"` // A pergunta do aluno
+	Resolved   bool       `gorm:"default:false" json:"resolved"`     // Status da dúvida
+	Answer     string     `gorm:"type:text" json:"answer"`           // A resposta do professor
+	AnsweredBy *uuid.UUID `gorm:"type:uuid" json:"answered_by"`      // Quem respondeu (Prof ou Monitor)
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// ==========================================================
+// 📷 FASE 5: CHECK-IN POR QR CODE (Lista de Presença)
+// ==========================================================
+// A Sessão gerada pelo Professor no telão
+type AttendanceSession struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	TeacherID uuid.UUID `gorm:"type:uuid;not null" json:"teacher_id"`
+	QRCode    string    `gorm:"size:255;uniqueIndex;not null" json:"qr_code"` // O Token único que vai virar o desenho do QR
+	ExpiresAt time.Time `json:"expires_at"`                                   // Validade (ex: 15 minutos)
+	IsActive  bool      `gorm:"default:true" json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// O registro de cada aluno que escaneou
+type AttendanceRecord struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SessionID uuid.UUID `gorm:"type:uuid;index;not null" json:"session_id"`
+	StudentID uuid.UUID `gorm:"type:uuid;index;not null" json:"student_id"`
+	CheckInAt time.Time `gorm:"autoCreateTime" json:"check_in_at"`
+}
+
+// ==========================================================
+// 🏆 FASE 6: EMBLEMAS CUSTOMIZADOS (Badges)
+// ==========================================================
+
+// O Emblema criado pelo Professor
+type Badge struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	TeacherID   uuid.UUID `gorm:"type:uuid;not null" json:"teacher_id"`
+	Name        string    `gorm:"size:100;not null" json:"name"`
+	Description string    `gorm:"type:text" json:"description"`
+	IconURL     string    `gorm:"type:text;not null" json:"icon_url"` // Link da imagem ou GIF
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// A carteira de emblemas do Aluno
+type UserBadge struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"` // Aluno que ganhou
+	BadgeID   uuid.UUID `gorm:"type:uuid;index;not null" json:"badge_id"`
+	AwardedBy uuid.UUID `gorm:"type:uuid;not null" json:"awarded_by"` // Professor que entregou
+	AwardedAt time.Time `gorm:"autoCreateTime" json:"awarded_at"`
+
+	// Preload: Traz os dados do emblema quando formos mostrar o Perfil do aluno
+	Badge Badge `gorm:"foreignKey:BadgeID" json:"badge"`
+}
+
+// ==========================================================
+// 🤖 FASE 7: GATILHOS DE AUTOMAÇÃO (Analytics B2B)
+// ==========================================================
+type AutomationRule struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID   uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	TeacherID uuid.UUID `gorm:"type:uuid;not null" json:"teacher_id"`
+
+	// A Condição (O "SE")
+	ConditionType  string  `gorm:"size:50;not null" json:"condition_type"` // Ex: "score_below"
+	ConditionValue float64 `json:"condition_value"`                        // Ex: 6.0
+
+	// A Ação (O "ENTÃO")
+	ActionType      string    `gorm:"size:50;not null" json:"action_type"`         // Ex: "unlock_notebook"
+	TargetContentID uuid.UUID `gorm:"type:uuid;not null" json:"target_content_id"` // O ID do Caderno Extra
+
+	IsActive  bool      `gorm:"default:true" json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
 }
