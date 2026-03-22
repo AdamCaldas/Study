@@ -37,9 +37,18 @@ type User struct {
 	HighestStreak    int            `json:"highest_streak" gorm:"default:0"`
 	DevicePlatform   string         `json:"device_platform"`
 
+	// Coloque isso junto dos outros campos booleanos do User
+	IsEmailVerified bool `gorm:"default:false" json:"is_email_verified"`
+
 	Title         string `gorm:"size:50" json:"title"`     // ex: "DESENVOLVEDOR"
 	Location      string `gorm:"size:100" json:"location"` // ex: "Brasil"
 	FollowerCount int64  `gorm:"-" json:"follower_count"`  // 👈 ADICIONE ISSO
+
+	// ==========================================================
+	// ⚙️ NOVOS CAMPOS: CONFIGURAÇÕES DO APP (Settings)
+	// ==========================================================
+	Theme             string `gorm:"size:20;default:'dark'" json:"theme"`    // 'dark' ou 'light'
+	PushNotifications bool   `gorm:"default:true" json:"push_notifications"` // true (ligado) ou false (desligado)
 }
 
 // SPACE
@@ -551,4 +560,42 @@ type AutomationRule struct {
 
 	IsActive  bool      `gorm:"default:true" json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// ==========================================================
+// 🐛 SISTEMA DE FEEDBACK E BUG REPORT
+// ==========================================================
+type BugReport struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ReporterID  uuid.UUID `gorm:"type:uuid;not null" json:"reporter_id"`  // Quem reportou o bug
+	Title       string    `gorm:"size:255;not null" json:"title"`         // Assunto (Ex: "Botão de salvar não funciona")
+	Description string    `gorm:"type:text;not null" json:"description"`  // O texto longo explicando o erro
+	Status      string    `gorm:"size:50;default:'UNREAD'" json:"status"` // Os 3 estados: UNREAD, ANALYSIS, RESOLVED
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	// Traz os dados do usuário para o Admin ver quem mandou
+	Reporter User `gorm:"foreignKey:ReporterID" json:"reporter"`
+}
+
+// ==========================================================
+// 🔐 SISTEMA DE VALIDAÇÃO DE E-MAIL (OTP)
+// ==========================================================
+type VerificationCode struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	Email     string    `gorm:"not null;index"`
+	Code      string    `gorm:"size:6;not null"`
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time
+}
+
+// ==========================================================
+// 🔑 RECUPERAÇÃO DE SENHA (Esqueci minha senha)
+// ==========================================================
+type PasswordReset struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	Email     string    `gorm:"not null;index"`
+	Token     string    `gorm:"not null;uniqueIndex"` // O token que vai no Link
+	ExpiresAt time.Time `gorm:"not null"`
+	CreatedAt time.Time
 }

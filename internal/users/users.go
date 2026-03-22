@@ -448,3 +448,45 @@ func UnfollowTeacher(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Você deixou de seguir este professor."})
 }
+
+// ==========================================================
+// ⚙️ ATUALIZAR CONFIGURAÇÕES DO APP (Settings)
+// ==========================================================
+func UpdateMySettings(c *gin.Context) {
+	userIDInterface, _ := c.Get("userID")
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	}
+
+	// Estrutura do JSON que o Front-end vai mandar
+	var input struct {
+		Theme             string `json:"theme" binding:"required"`              // Ex: "dark" ou "light"
+		PushNotifications *bool  `json:"push_notifications" binding:"required"` // Ponteiro para aceitar false corretamente
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos. Envie theme e push_notifications."})
+		return
+	}
+
+	// Atualiza apenas as duas colunas no banco de dados
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"theme":              input.Theme,
+		"push_notifications": *input.PushNotifications,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar configurações."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Configurações salvas com sucesso!",
+		"settings": gin.H{
+			"theme":              input.Theme,
+			"push_notifications": *input.PushNotifications,
+		},
+	})
+}

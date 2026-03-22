@@ -133,3 +133,175 @@ func DeleteStudyPlan(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{"message": "Atividade removida do cronograma!"})
 }
+
+// ==========================================================
+// 🤖 NOVO FLUXO: GERADOR AUTOMÁTICO DE PLANO DE ESTUDOS
+// ==========================================================
+
+// Estrutura que o Front-end vai nos enviar
+type AutoPlanInput struct {
+	WakeUpTime         string `json:"wake_up_time" binding:"required"`   // Ex: "07:00"
+	SleepTime          string `json:"sleep_time" binding:"required"`     // Ex: "23:00"
+	WorkStart          string `json:"work_start"`                        // Ex: "08:00"
+	WorkEnd            string `json:"work_end"`                          // Ex: "18:00"
+	LunchStart         string `json:"lunch_start"`                       // Ex: "12:00"
+	LunchEnd           string `json:"lunch_end"`                         // Ex: "13:00"
+	FreeTimePreference int    `json:"free_time_preference"`              // Minutos de lazer exigidos por dia (Ex: 60)
+	DaysAvailable      []int  `json:"days_available" binding:"required"` // Ex: [1, 2, 3, 4, 5] (Segunda a Sexta)
+}
+
+// Funções auxiliares para converter horas em minutos e vice-versa
+func timeToMinutes(t string) int {
+	if t == "" {
+		return 0
+	}
+	var h, m int
+	fmt.Sscanf(t, "%d:%d", &h, &m)
+	return h*60 + m
+}
+
+func minutesToTime(m int) string {
+	h := (m / 60) % 24
+	mins := m % 60
+	return fmt.Sprintf("%02d:%02d", h, mins)
+}
+
+// A Rota Principal
+func GenerateAutoPlan(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+	spaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
+	var input AutoPlanInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: Verifique os horários enviados."})
+		return
+	}
+
+	// Busca se a turma tem um Ciclo de Estudos Ativo para puxarmos os nomes das matérias
+	var activeCycle models.StudyCycle
+	database.DB.Preload("Items").Where("space_id = ? AND is_active = true", spaceID).First(&activeCycle)
+
+	var generatedPlans []models.StudyPlan
+	subjectIndex := 0
+
+	// Variáveis de tempo em minutos
+	wake := timeToMinutes(input.WakeUpTime)
+	sleep := timeToMinutes(input.SleepTime)
+	if sleep < wake { // Caso ele durma depois da meia-noite (Ex: 01:00)
+		sleep += 1440
+	}
+	workStart := timeToMinutes(input.WorkStart)
+	workEnd := timeToMinutes(input.WorkEnd)
+	lunchStart := timeToMinutes(input.LunchStart)
+	lunchEnd := timeToMinutes(input.LunchEnd)
+
+	// Gera o plano para cada dia selecionado
+	for _, day := range input.DaysAvailable {
+		// Cria uma linha do tempo de 24h (1440 minutos)
+		// true = Ocupado, false = Livre
+		timeline := make([]bool, 1440*2) // *2 para lidar com dias que viram a madrugada
+
+		// 1. Bloqueia o tempo de sono
+		for i := 0; i < wake; i++ {
+			timeline[i] = true
+		}
+		for i := sleep; i < len(timeline); i++ {
+			timeline[i] = true
+		}
+
+		// 2. Bloqueia o trabalho/escola
+		if workStart > 0 && workEnd > workStart {
+			for i := workStart; i < workEnd; i++ {
+				timeline[i] = true
+			}
+		}
+
+		// 3. Bloqueia o almoço
+		if lunchStart > 0 && lunchEnd > lunchStart {
+			for i := lunchStart; i < lunchEnd; i++ {
+				timeline[i] = true
+			}
+		}
+
+		// 4. Extrai os blocos livres (Mágica do Algoritmo)
+		var freeBlocks [][]int
+		startFree := -1
+		for i := wake; i < sleep; i++ {
+			if !timeline[i] && startFree == -1 {
+				startFree = i
+			} else if timeline[i] && startFree != -1 {
+				freeBlocks = append(freeBlocks, []int{startFree, i})
+				startFree = -1
+			}
+		}
+		if startFree != -1 { // Se o dia terminar livre
+			freeBlocks = append(freeBlocks, []int{startFree, sleep})
+		}
+
+		// 5. Deduz o tempo livre (lazer) do último bloco do dia
+		lazerRestante := input.FreeTimePreference
+		if lazerRestante > 0 && len(freeBlocks) > 0 {
+			lastBlockIndex := len(freeBlocks) - 1
+			blockDuration := freeBlocks[lastBlockIndex][1] - freeBlocks[lastBlockIndex][0]
+
+			if blockDuration > lazerRestante {
+				freeBlocks[lastBlockIndex][1] -= lazerRestante
+			} else {
+				// Se o lazer pedido for maior que o ultimo bloco inteiro, cancela o bloco
+				freeBlocks = freeBlocks[:lastBlockIndex]
+			}
+		}
+
+		// 6. Fatiar os blocos grandes em Sessões de Estudo (Ex: 50 minutos estudo + 10 min pausa)
+		sessionLength := 50
+		breakLength := 10
+
+		for _, block := range freeBlocks {
+			currentTime := block[0]
+			endTime := block[1]
+
+			for currentTime+sessionLength <= endTime {
+				// Define qual matéria estudar puxando da roleta do ciclo ativo
+				activityName := "Sessão de Estudo"
+				var notebookID *uuid.UUID = nil
+
+				if len(activeCycle.Items) > 0 {
+					item := activeCycle.Items[subjectIndex%len(activeCycle.Items)]
+					if item.Name != "" {
+						activityName = "Estudar: " + item.Name
+					}
+					notebookID = item.NotebookID
+					subjectIndex++
+				}
+
+				// Salva no banco de dados
+				newPlan := models.StudyPlan{
+					SpaceID:   spaceID,
+					DayOfWeek: day,
+					StartTime: minutesToTime(currentTime),
+					EndTime:   minutesToTime(currentTime + sessionLength),
+					Activity:  activityName,
+				}
+				if notebookID != nil {
+					newPlan.NotebookID = *notebookID
+				}
+
+				database.DB.Create(&newPlan)
+				generatedPlans = append(generatedPlans, newPlan)
+
+				// Avança o tempo (Sessão + Pausa)
+				currentTime += sessionLength + breakLength
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Plano de estudos gerado automaticamente com sucesso!",
+		"plans_created": len(generatedPlans),
+		"agenda":        generatedPlans,
+	})
+}

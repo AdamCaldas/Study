@@ -72,6 +72,7 @@ func ConnectDB() {
 		&models.NotebookPermission{}, // Permissões de caderno
 		&models.GamificationRule{},   // Regras de XP
 		&models.Guide{},              // Guias dos Cadernos
+		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
 
 		// ==========================================
 		// 👇 NOVAS TABELAS DAS FASES 1 A 7 👇
