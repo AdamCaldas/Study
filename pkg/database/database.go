@@ -73,6 +73,8 @@ func ConnectDB() {
 		&models.GamificationRule{},   // Regras de XP
 		&models.Guide{},              // Guias dos Cadernos
 		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
+		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
+		&models.VerificationCode{},   // 🔐 Tabela de Códigos de E-mail (NOVO)
 
 		// ==========================================
 		// 👇 NOVAS TABELAS DAS FASES 1 A 7 👇

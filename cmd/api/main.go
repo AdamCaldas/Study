@@ -55,7 +55,10 @@ func main() {
 	})
 
 	router.POST("/v1/register", auth.Register)
+	router.POST("/v1/verify-email", auth.VerifyEmailCode)
 	router.POST("/v1/login", auth.Login)
+	router.POST("/v1/forgot-password", auth.ForgotPassword) // 👈 ESQUECI A SENHA
+	router.POST("/v1/reset-password", auth.ResetPassword)   // 👈 SALVAR NOVA SENHA
 
 	// ==========================================================
 	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO (Requer JWT)
