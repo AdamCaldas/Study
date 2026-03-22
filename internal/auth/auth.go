@@ -73,7 +73,7 @@ func Register(c *gin.Context) {
 	database.DB.Create(&otp)
 
 	// 6. 📧 Dispara o E-mail em background (Goroutine)
-	go utils.SendVerificationEmail(newUser.Email, newUser.FullName, code)
+	utils.SendVerificationEmail(newUser.Email, newUser.FullName, code)
 
 	// 7. Sucesso!
 	c.JSON(http.StatusCreated, gin.H{

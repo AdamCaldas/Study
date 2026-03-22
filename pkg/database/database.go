@@ -75,6 +75,7 @@ func ConnectDB() {
 		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
 		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
 		&models.VerificationCode{},   // 🔐 Tabela de Códigos de E-mail (NOVO)
+		&models.PasswordReset{},      // 👈 Essa belezinha tem que estar aqui!
 
 		// ==========================================
 		// 👇 NOVAS TABELAS DAS FASES 1 A 7 👇
