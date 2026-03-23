@@ -525,3 +525,13 @@ type PasswordReset struct {
 	ExpiresAt time.Time `gorm:"not null"`
 	CreatedAt time.Time
 }
+
+type StudySession struct {
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	SpaceID        uuid.UUID `json:"space_id"`
+	ActivityName   string    `json:"activity_name"`
+	PlannedMinutes int       `json:"planned_minutes"` // Os 60 min que o Back sugeriu
+	ActualMinutes  int       `json:"actual_duration"` // Os 180 min que ele fez
+	CreatedAt      time.Time `json:"created_at"`
+}

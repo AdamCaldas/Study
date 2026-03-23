@@ -379,11 +379,45 @@ func DeleteStudyPlan(c *gin.Context) {
 // ==========================================================
 // 🔄 4. AVANÇAR PASSO (Para o modo Adaptive)
 // ==========================================================
+// 🔄 4. AVANÇAR PASSO E REGISTRAR TEMPO REAL (Para Relatórios)
 func AdvanceStrategyStep(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	var strategy models.StudyStrategy
+	userID, _ := c.Get("userID")
 
-	if err := database.DB.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+	// Estrutura para receber os dados do cronômetro do Front-end
+	var input struct {
+		ActualDuration int    `json:"actual_duration"` // Tempo real que o aluno ficou (ex: 180 min)
+		ActivityName   string `json:"activity_name"`   // Nome da matéria (ex: Matemática)
+		PlannedMinutes int    `json:"planned_minutes"` // O tempo que o sistema tinha sugerido (ex: 60 min)
+	}
+
+	// Se o Front não mandar o tempo, a gente dá erro para não perder o relatório
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "O Front-end precisa enviar o tempo real estudado."})
+		return
+	}
+
+	tx := database.DB.Begin()
+
+	// 1. Criamos o registro do "Ponto" (Sessão de Estudo)
+	session := models.StudySession{
+		UserID:         userID.(uuid.UUID),
+		SpaceID:        uuid.MustParse(spaceID),
+		ActivityName:   input.ActivityName,
+		PlannedMinutes: input.PlannedMinutes,
+		ActualMinutes:  input.ActualDuration, // Salvando as 3 horas aqui!
+	}
+
+	if err := tx.Create(&session).Error; err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao salvar o histórico de tempo."})
+		return
+	}
+
+	// 2. Avançamos o card do ciclo (Lógica original mantida)
+	var strategy models.StudyStrategy
+	if err := tx.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+		tx.Rollback()
 		c.JSON(404, gin.H{"error": "Estratégia não encontrada"})
 		return
 	}
@@ -391,8 +425,14 @@ func AdvanceStrategyStep(c *gin.Context) {
 	totalItems := len(strategy.Blocks)
 	if totalItems > 0 {
 		strategy.CurrentStep = (strategy.CurrentStep + 1) % totalItems
-		database.DB.Save(&strategy)
+		tx.Save(&strategy)
 	}
 
-	c.JSON(200, gin.H{"message": "Avançado!", "current_step": strategy.CurrentStep})
+	tx.Commit()
+
+	c.JSON(200, gin.H{
+		"message":        "Tempo registrado e próximo card liberado!",
+		"actual_minutes": input.ActualDuration,
+		"next_step":      strategy.CurrentStep,
+	})
 }

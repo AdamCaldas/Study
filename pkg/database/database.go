@@ -81,6 +81,7 @@ func ConnectDB() {
 		&models.BugReport{},
 		&models.VerificationCode{},
 		&models.PasswordReset{},
+		&models.StudySession{},
 
 		// ==========================================
 		// 👇 FASES 1 A 7 👇
