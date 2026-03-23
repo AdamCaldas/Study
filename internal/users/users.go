@@ -1,6 +1,7 @@
 package users
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -125,6 +126,15 @@ func GetMyProfile(c *gin.Context) {
 		}{}
 	}
 
+	// ---------------------------------------------------------
+	// 👉 AQUI A MÁGICA: Busca as Rotinas Globais do Usuário
+	// ---------------------------------------------------------
+	var availabilityProfiles []models.AvailabilityProfile
+	database.DB.Where("user_id = ?", userID).Find(&availabilityProfiles)
+	if availabilityProfiles == nil {
+		availabilityProfiles = []models.AvailabilityProfile{}
+	}
+
 	// 4. Monta o JSON GIGANTE de Resposta com tudo que o Front-end pediu
 	c.JSON(http.StatusOK, gin.H{
 		"profile": user,
@@ -141,9 +151,10 @@ func GetMyProfile(c *gin.Context) {
 			"qtd_notes":      qtdNotes,
 			"qtd_strategies": qtdStrategies,
 		},
-		"study_strategies": userStrategies,
-		"owned_spaces":     ownedSpaces,
-		"guest_spaces":     guestSpaces,
+		"study_strategies":      userStrategies,
+		"owned_spaces":          ownedSpaces,
+		"guest_spaces":          guestSpaces,
+		"availability_profiles": availabilityProfiles, // 👈 ENVIANDO A ROTINA PARA O MAYAN AQUI!
 	})
 }
 
@@ -458,5 +469,55 @@ func UpdateMySettings(c *gin.Context) {
 			"theme":              input.Theme,
 			"push_notifications": *input.PushNotifications,
 		},
+	})
+}
+
+// ==========================================================
+// ⏰ SALVAR OU CRIAR ROTINA GLOBAL (Availability Profile)
+// ==========================================================
+func SaveAvailabilityProfile(c *gin.Context) {
+	userIDInterface, _ := c.Get("userID")
+
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	}
+
+	var input struct {
+		Name      string `json:"name" binding:"required"`     // Ex: "Rotina Padrão"
+		Schedule  any    `json:"schedule" binding:"required"` // Aceita o Array do Front
+		IsDefault bool   `json:"is_default"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	// Transforma o array que o Front mandou em String JSON para salvar no banco
+	scheduleJSON, _ := json.Marshal(input.Schedule)
+
+	profile := models.AvailabilityProfile{
+		UserID:    userID,
+		Name:      input.Name,
+		Schedule:  string(scheduleJSON),
+		IsDefault: input.IsDefault,
+	}
+
+	// Se o usuário marcou como padrão, tira o padrão dos outros
+	if input.IsDefault {
+		database.DB.Model(&models.AvailabilityProfile{}).
+			Where("user_id = ?", userID).
+			Update("is_default", false)
+	}
+
+	database.DB.Create(&profile)
+
+	c.JSON(201, gin.H{
+		"message": "Rotina salva com sucesso!",
+		"profile": profile,
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"time"
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -35,14 +36,15 @@ type DailyScheduleInput struct {
 }
 
 type GenerateStrategyInput struct {
-	Mode               string               `json:"mode" binding:"required"`
-	TargetGoal         string               `json:"target_goal"`
-	HoursPerDay        float64              `json:"hours_per_day"`
-	DailyAvailability  []DailyScheduleInput `json:"daily_availability" binding:"required"`
-	FreeTimePreference int                  `json:"free_time_preference"`
-	MinSessionMin      int                  `json:"min_session_minutes"`
-	MaxSessionMin      int                  `json:"max_session_minutes"`
-	Disciplines        []DisciplineInput    `json:"disciplines" binding:"required"`
+	Mode               string            `json:"mode" binding:"required"`
+	Source             string            `json:"source"` // "user" ou "institution"
+	TargetGoal         string            `json:"target_goal"`
+	HoursPerDay        float64           `json:"hours_per_day"`
+	AvailabilityID     *uuid.UUID        `json:"availability_id" binding:"required"` // Puxa do Perfil Global
+	FreeTimePreference int               `json:"free_time_preference"`
+	MinSessionMin      int               `json:"min_session_minutes"`
+	MaxSessionMin      int               `json:"max_session_minutes"`
+	Disciplines        []DisciplineInput `json:"disciplines" binding:"required"`
 }
 
 type CreateManualBlockInput struct {
@@ -134,6 +136,23 @@ func GenerateAutoPlan(c *gin.Context) {
 
 	tx := database.DB.Begin()
 
+	// 👉 1. A MÁGICA AQUI: Buscar a rotina global do usuário!
+	var availabilityProfile models.AvailabilityProfile
+	if err := tx.Where("id = ? AND user_id = ?", input.AvailabilityID, userID).First(&availabilityProfile).Error; err != nil {
+		tx.Rollback()
+		c.JSON(404, gin.H{"error": "Perfil de disponibilidade não encontrado."})
+		return
+	}
+
+	// Transformar a string JSON do banco de volta em um Array de horários pro motor ler
+	var dailyAvailability []DailyScheduleInput
+	if err := json.Unmarshal([]byte(availabilityProfile.Schedule), &dailyAvailability); err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao ler os horários do perfil."})
+		return
+	}
+
+	// 👉 2. Destruição e Recriação da Estratégia
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{SpaceID: spaceID}
@@ -142,6 +161,7 @@ func GenerateAutoPlan(c *gin.Context) {
 
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
+	// Cria os cadernos vazios
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
 			newNb := models.Notebook{
@@ -156,17 +176,23 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
-	availDaysJSON, _ := json.Marshal(input.DailyAvailability)
+	// 👉 3. Atualizar a Estratégia com o novo campo "Source"
 	strategy.Mode = input.Mode
+	if input.Source != "" {
+		strategy.Source = input.Source
+	} else {
+		strategy.Source = "user"
+	}
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
-	strategy.DailyAvailability = string(availDaysJSON)
 	strategy.FreeTimePreference = input.FreeTimePreference
 	strategy.MinSessionMin = input.MinSessionMin
 	strategy.MaxSessionMin = input.MaxSessionMin
 	tx.Save(&strategy)
 
 	dailyMinutes := input.HoursPerDay * 60
+
+	// 👉 4. Chama a Matemática enviando a rotina do Perfil Global
 	baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
 	var finalBlocks []models.StudyBlock
 
@@ -175,7 +201,6 @@ func GenerateAutoPlan(c *gin.Context) {
 			block.StrategyID = strategy.ID
 			finalBlocks = append(finalBlocks, block)
 		}
-
 	} else {
 		subjectIndex := 0
 		sessionLength := input.MaxSessionMin
@@ -184,8 +209,8 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 		breakLength := 10
 
-		// 🧙‍♂️ MÁGICA ATUALIZADA: Iterando sobre as configurações INDIVIDUAIS de cada dia
-		for _, dayConfig := range input.DailyAvailability {
+		// Iterando sobre as configurações INDIVIDUAIS do Perfil Global
+		for _, dayConfig := range dailyAvailability {
 			timeline := make([]bool, 1440*2)
 
 			wake := timeToMinutes(dayConfig.WakeUpTime)
@@ -251,7 +276,7 @@ func GenerateAutoPlan(c *gin.Context) {
 					}
 					baseBlock := baseBlocks[subjectIndex%len(baseBlocks)]
 
-					dayCopy := dayConfig.DayOfWeek // Pega o dia correto da config
+					dayCopy := dayConfig.DayOfWeek
 					startCopy := minutesToTime(curr)
 					endCopy := minutesToTime(curr + sessionLength)
 
@@ -377,9 +402,8 @@ func DeleteStudyPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔄 4. AVANÇAR PASSO (Para o modo Adaptive)
-// ==========================================================
 // 🔄 4. AVANÇAR PASSO E REGISTRAR TEMPO REAL (Para Relatórios)
+// ==========================================================
 func AdvanceStrategyStep(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	userID, _ := c.Get("userID")
@@ -405,7 +429,7 @@ func AdvanceStrategyStep(c *gin.Context) {
 		SpaceID:        uuid.MustParse(spaceID),
 		ActivityName:   input.ActivityName,
 		PlannedMinutes: input.PlannedMinutes,
-		ActualMinutes:  input.ActualDuration, // Salvando as 3 horas aqui!
+		ActualMinutes:  input.ActualDuration, // Salvando as horas reais!
 	}
 
 	if err := tx.Create(&session).Error; err != nil {
@@ -434,5 +458,80 @@ func AdvanceStrategyStep(c *gin.Context) {
 		"message":        "Tempo registrado e próximo card liberado!",
 		"actual_minutes": input.ActualDuration,
 		"next_step":      strategy.CurrentStep,
+	})
+}
+
+// ==========================================================
+// 📊 GET ANALYTICS: Relatório de Desempenho do Aluno
+// ==========================================================
+func GetMyStudyAnalytics(c *gin.Context) {
+	userIDInterface, _ := c.Get("userID")
+
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação"})
+		return
+	}
+
+	// 1. Buscamos todas as sessões do aluno (Vamos focar nos últimos 30 dias para não pesar o banco)
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
+	var sessions []models.StudySession
+
+	if err := database.DB.Where("user_id = ? AND created_at >= ?", userID, thirtyDaysAgo).Find(&sessions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar histórico de estudos."})
+		return
+	}
+
+	// 2. Variáveis para somar os totais
+	var todayMinutes, weekMinutes, extraMinutes int
+	subjectTotals := make(map[string]int)
+
+	// Lógica para descobrir o início de "Hoje" e o início da "Semana"
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	startOfWeek := startOfDay.AddDate(0, 0, -int(now.Weekday())) // Volta até o Domingo
+
+	// 3. A Matemática (Iterando sobre as sessões salvas)
+	for _, s := range sessions {
+		// Gráfico de Pizza: Soma tempo por matéria
+		subjectTotals[s.ActivityName] += s.ActualMinutes
+
+		// Calcula apenas o "suor extra" (O que ele estudou a mais do que o planejado)
+		if s.ActualMinutes > s.PlannedMinutes {
+			extraMinutes += (s.ActualMinutes - s.PlannedMinutes)
+		}
+
+		// Filtros de tempo
+		if s.CreatedAt.After(startOfDay) {
+			todayMinutes += s.ActualMinutes
+		}
+		if s.CreatedAt.After(startOfWeek) {
+			weekMinutes += s.ActualMinutes
+		}
+	}
+
+	// 4. Formata o mapa de matérias num array de JSON para o Front-end ler fácil
+	type SubjectStat struct {
+		Name    string `json:"name"`
+		Minutes int    `json:"minutes"`
+	}
+	var distribution []SubjectStat
+	for name, mins := range subjectTotals {
+		distribution = append(distribution, SubjectStat{Name: name, Minutes: mins})
+	}
+
+	// 5. O Payload Perfeito
+	c.JSON(http.StatusOK, gin.H{
+		"overview": gin.H{
+			"today_minutes": todayMinutes,
+			"week_minutes":  weekMinutes,
+			"extra_minutes": extraMinutes,
+		},
+		"subject_distribution": distribution,
 	})
 }

@@ -73,6 +73,8 @@ func main() {
 		protected.PUT("/me/password", users.UpdatePassword)
 		protected.DELETE("/me", users.DeleteMyAccount)
 		protected.POST("/me/become-teacher", users.BecomeTeacher)
+		protected.POST("/me/availability", users.SaveAvailabilityProfile)
+		protected.GET("/me/analytics", study.GetMyStudyAnalytics)
 
 		// 👉 Repositório Global do Professor
 		protected.GET("/me/question-bank", study.GetMyQuestionBank)

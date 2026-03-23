@@ -194,26 +194,19 @@ type PageNote struct {
 // 🧠 NOVO MOTOR UNIFICADO DE ESTUDOS (Substitui Cycle e Plan)
 // ==========================================================
 
-// A Configuração Geral (A Estratégia) - Regra: 1 por Space
+// STUDY STRATEGY (O Cérebro do Space)
 type StudyStrategy struct {
-	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID    uuid.UUID  `gorm:"type:uuid;uniqueIndex;not null" json:"space_id"` // 1 Space = 1 Estratégia
-	Mode       string     `gorm:"size:20;default:'fixed'" json:"mode"`            // 'fixed' (Cronograma) ou 'adaptive' (Ciclo)
-	TargetGoal string     `gorm:"size:255" json:"target_goal"`
-	TargetDate *time.Time `json:"target_date"`
+	ID                 uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID            uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"space_id"` // 1 Space = 1 Estratégia
+	Mode               string    `gorm:"size:50;not null;default:'adaptive'" json:"mode"`
+	Source             string    `gorm:"size:50;not null;default:'user'" json:"source"` // NOVO: Trava Institucional
+	TargetGoal         string    `gorm:"size:255" json:"target_goal"`
+	HoursPerDay        float64   `json:"hours_per_day"`
+	MinSessionMin      int       `gorm:"default:30" json:"min_session_minutes"`
+	MaxSessionMin      int       `gorm:"default:50" json:"max_session_minutes"`
+	FreeTimePreference int       `gorm:"default:0" json:"free_time_preference"`
+	CurrentStep        int       `gorm:"default:0" json:"current_step"`
 
-	// 👇 A SOLUÇÃO DO FURO: A rotina diária flexível (Array de dias) salva como JSON no banco
-	DailyAvailability string `gorm:"type:jsonb" json:"daily_availability"`
-
-	// Configurações Globais mantidas
-	HoursPerDay        float64 `json:"hours_per_day"` // Ainda útil como meta diária média
-	MinSessionMin      int     `gorm:"default:30" json:"min_session_minutes"`
-	MaxSessionMin      int     `gorm:"default:90" json:"max_session_minutes"`
-	FreeTimePreference int     `gorm:"default:60" json:"free_time_preference"`
-
-	CurrentStep int `gorm:"default:0" json:"current_step"` // Para o modo adaptive saber onde parou
-
-	// A Lista de Matérias/Horários
 	Blocks []StudyBlock `gorm:"foreignKey:StrategyID;constraint:OnDelete:CASCADE" json:"blocks"`
 
 	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
@@ -534,4 +527,17 @@ type StudySession struct {
 	PlannedMinutes int       `json:"planned_minutes"` // Os 60 min que o Back sugeriu
 	ActualMinutes  int       `json:"actual_duration"` // Os 180 min que ele fez
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ==========================================================
+// ⏰ PERFIL DE DISPONIBILIDADE GLOBAL (O "Livro de Ponto" do Aluno)
+// ==========================================================
+type AvailabilityProfile struct {
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	Name      string    `gorm:"size:100;not null" json:"name"`       // Ex: "Rotina Padrão", "Férias"
+	Schedule  string    `gorm:"type:jsonb;not null" json:"schedule"` // O array de dias (salvo como string JSON)
+	IsDefault bool      `gorm:"default:false" json:"is_default"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

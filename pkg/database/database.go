@@ -82,6 +82,7 @@ func ConnectDB() {
 		&models.VerificationCode{},
 		&models.PasswordReset{},
 		&models.StudySession{},
+		&models.AvailabilityProfile{},
 
 		// ==========================================
 		// 👇 FASES 1 A 7 👇
