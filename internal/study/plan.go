@@ -305,3 +305,58 @@ func GenerateAutoPlan(c *gin.Context) {
 		"agenda":        generatedPlans,
 	})
 }
+
+// 1. Nova estrutura para receber uma lista do Frontend
+type CreateMultipleStudyPlansInput struct {
+	Plans []CreateStudyPlanInput `json:"plans" binding:"required"`
+}
+
+// 2. Nova Função para criar vários de uma vez
+func CreateMultipleStudyPlans(c *gin.Context) {
+	userID, _ := c.Get("userID")
+	spaceID := c.Param("space_id")
+
+	// Valida se o usuário é dono do Space
+	var space models.Space
+	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
+		return
+	}
+
+	var input CreateMultipleStudyPlansInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: envie uma lista de planos"})
+		return
+	}
+
+	parsedSpaceID, _ := uuid.Parse(spaceID)
+	var createdPlans []models.StudyPlan
+
+	// Inicia uma Transação no banco (ou tudo salva ou nada salva, mais seguro)
+	tx := database.DB.Begin()
+
+	for _, item := range input.Plans {
+		newPlan := models.StudyPlan{
+			SpaceID:    parsedSpaceID,
+			DayOfWeek:  item.DayOfWeek,
+			StartTime:  item.StartTime,
+			EndTime:    item.EndTime,
+			NotebookID: item.NotebookID,
+			Activity:   item.Activity,
+		}
+
+		if err := tx.Create(&newPlan).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar um dos horários"})
+			return
+		}
+		createdPlans = append(createdPlans, newPlan)
+	}
+
+	tx.Commit()
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": fmt.Sprintf("%d horários adicionados com sucesso!", len(createdPlans)),
+		"plans":   createdPlans,
+	})
+}

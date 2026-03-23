@@ -145,6 +145,7 @@ func main() {
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan) // 🤖 NOVO: Gerador automático
 			spaceRoutes.GET("/plans", study.ListPlans)                       // 📋 NOVO: Listar grade
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)                // Criar bloco manual
+			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans) // 🚀 ADICIONADO AQUI
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
