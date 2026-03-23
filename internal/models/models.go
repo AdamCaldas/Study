@@ -541,3 +541,30 @@ type AvailabilityProfile struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// ==========================================================
+// 💡 CENTRAL DE AJUDA (StudFy Academy)
+// ==========================================================
+
+// O "Bloco" / Categoria (Ex: "Primeiros Passos")
+type HelpCategory struct {
+	ID          uuid.UUID     `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	Title       string        `gorm:"size:100;not null" json:"title"`
+	Description string        `json:"description"`
+	Order       int           `json:"order"` // Para ordenar qual bloco aparece primeiro
+	Articles    []HelpArticle `gorm:"foreignKey:CategoryID;constraint:OnDelete:CASCADE" json:"articles"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+}
+
+// O "Passo a Passo" com Vídeo
+type HelpArticle struct {
+	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	CategoryID uuid.UUID `gorm:"type:uuid;index;not null" json:"category_id"`
+	Title      string    `gorm:"size:255;not null" json:"title"`
+	VideoURL   string    `json:"video_url"`                // Link do YouTube/Vimeo
+	Content    string    `gorm:"type:text" json:"content"` // O texto explicativo
+	Order      int       `json:"order"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}

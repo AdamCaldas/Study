@@ -85,6 +85,9 @@ func main() {
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
 		protected.POST("/bugs", admin.ReportBug)
 
+		// 👉 Central de Ajuda (Visão do Aluno - StudFy Academy)
+		protected.GET("/help-center", admin.GetHelpCenter)
+
 		// 👉 Rede Social (Vitrine)
 		protected.GET("/teachers/:id", users.GetTeacherProfile)
 		protected.POST("/teachers/:id/follow", users.FollowTeacher)
@@ -223,6 +226,12 @@ func main() {
 		// 👉 Central de Bugs e Suporte (NOVO Kanban)
 		godMode.GET("/bugs", admin.ListBugs)
 		godMode.PUT("/bugs/:id/status", admin.UpdateBugStatus)
+
+		// 👉 Gestão da Central de Ajuda (StudFy Academy)
+		godMode.POST("/help-center/categories", admin.CreateHelpCategory)
+		godMode.DELETE("/help-center/categories/:category_id", admin.DeleteHelpCategory)
+		godMode.POST("/help-center/articles", admin.CreateHelpArticle)
+		godMode.DELETE("/help-center/articles/:article_id", admin.DeleteHelpArticle)
 	}
 
 	// ==========================================================

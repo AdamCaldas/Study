@@ -74,6 +74,7 @@ func minutesToTime(m int) string {
 	return fmt.Sprintf("%02d:%02d", h, mins)
 }
 
+// Essa função agora só é usada para fatiar os bloquinhos do modo FIXED
 func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
 	var totalWeight float64 = 0
 	var calculatedBlocks []models.StudyBlock
@@ -103,7 +104,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 		for b := 0; b < blocksNeeded; b++ {
 			calculatedBlocks = append(calculatedBlocks, models.StudyBlock{
 				NotebookID:       disc.NotebookID,
-				Activity:         "Estudar: " + disc.Name,
+				Activity:         disc.Name,
 				Importance:       disc.Importance,
 				Performance:      disc.Performance,
 				SuggestedMinutes: suggestedMin,
@@ -144,7 +145,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// Transformar a string JSON do banco de volta em um Array de horários pro motor ler
 	var dailyAvailability []DailyScheduleInput
 	if err := json.Unmarshal([]byte(availabilityProfile.Schedule), &dailyAvailability); err != nil {
 		tx.Rollback()
@@ -176,7 +176,7 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
-	// 👉 3. Atualizar a Estratégia com o novo campo "Source"
+	// 👉 3. Atualizar a Estratégia
 	strategy.Mode = input.Mode
 	if input.Source != "" {
 		strategy.Source = input.Source
@@ -190,18 +190,45 @@ func GenerateAutoPlan(c *gin.Context) {
 	strategy.MaxSessionMin = input.MaxSessionMin
 	tx.Save(&strategy)
 
+	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
 
-	// 👉 4. Chama a Matemática enviando a rotina do Perfil Global
-	baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
-	var finalBlocks []models.StudyBlock
-
+	// =================================================================
+	// 👉 4. LÓGICA DIVIDIDA: CICLO (Sem duplicar) vs CRONOGRAMA (Fatiado)
+	// =================================================================
 	if input.Mode == "adaptive" {
-		for _, block := range baseBlocks {
-			block.StrategyID = strategy.ID
-			finalBlocks = append(finalBlocks, block)
+		// MODO CICLO: Apenas 1 bloco por matéria. Sem duplicação na semana.
+		var totalWeight float64 = 0
+		for _, disc := range input.Disciplines {
+			totalWeight += float64(disc.Importance + (6 - disc.Performance))
 		}
+
+		sequence := 1
+		for _, disc := range input.Disciplines {
+			weight := float64(disc.Importance + (6 - disc.Performance))
+			proportion := weight / totalWeight
+			suggestedMin := int(math.Round(proportion * dailyMinutes))
+
+			// Respeita o mínimo, mas não fatiamos pelo máximo (é um bloco só!)
+			if input.MinSessionMin > 0 && suggestedMin < input.MinSessionMin {
+				suggestedMin = input.MinSessionMin
+			}
+
+			finalBlocks = append(finalBlocks, models.StudyBlock{
+				StrategyID:       strategy.ID,
+				NotebookID:       disc.NotebookID,
+				Activity:         disc.Name,
+				Importance:       disc.Importance,
+				Performance:      disc.Performance,
+				SuggestedMinutes: suggestedMin,
+				Sequence:         sequence,
+			})
+			sequence++
+		}
+
 	} else {
+		// MODO FIXED: Fatiar e encaixar nos horários da semana
+		baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
 		subjectIndex := 0
 		sessionLength := input.MaxSessionMin
 		if sessionLength == 0 {
@@ -209,7 +236,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 		breakLength := 10
 
-		// Iterando sobre as configurações INDIVIDUAIS do Perfil Global
 		for _, dayConfig := range dailyAvailability {
 			timeline := make([]bool, 1440*2)
 
@@ -281,12 +307,13 @@ func GenerateAutoPlan(c *gin.Context) {
 					endCopy := minutesToTime(curr + sessionLength)
 
 					newBlock := models.StudyBlock{
-						StrategyID: strategy.ID,
-						NotebookID: baseBlock.NotebookID,
-						Activity:   baseBlock.Activity,
-						DayOfWeek:  &dayCopy,
-						StartTime:  &startCopy,
-						EndTime:    &endCopy,
+						StrategyID:       strategy.ID,
+						NotebookID:       baseBlock.NotebookID,
+						Activity:         baseBlock.Activity,
+						DayOfWeek:        &dayCopy,
+						StartTime:        &startCopy,
+						EndTime:          &endCopy,
+						SuggestedMinutes: sessionLength,
 					}
 					finalBlocks = append(finalBlocks, newBlock)
 
@@ -478,7 +505,7 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		return
 	}
 
-	// 1. Buscamos todas as sessões do aluno (Vamos focar nos últimos 30 dias para não pesar o banco)
+	// 1. Buscamos todas as sessões do aluno nos últimos 30 dias
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
 	var sessions []models.StudySession
 
@@ -498,15 +525,12 @@ func GetMyStudyAnalytics(c *gin.Context) {
 
 	// 3. A Matemática (Iterando sobre as sessões salvas)
 	for _, s := range sessions {
-		// Gráfico de Pizza: Soma tempo por matéria
 		subjectTotals[s.ActivityName] += s.ActualMinutes
 
-		// Calcula apenas o "suor extra" (O que ele estudou a mais do que o planejado)
 		if s.ActualMinutes > s.PlannedMinutes {
 			extraMinutes += (s.ActualMinutes - s.PlannedMinutes)
 		}
 
-		// Filtros de tempo
 		if s.CreatedAt.After(startOfDay) {
 			todayMinutes += s.ActualMinutes
 		}
