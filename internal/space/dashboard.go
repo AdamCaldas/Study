@@ -38,7 +38,7 @@ func GetSpaceDashboard(c *gin.Context) {
 	var owner models.User
 	database.DB.Select("id, full_name, email, profile_pic").Where("id = ?", space.OwnerID).First(&owner)
 
-	// 🌟 3. BUSCA OS COLABORADORES (Com todas as permissões granulares)
+	// 🌟 3. BUSCA OS COLABORADORES (Com todas as permissões granulares atualizadas)
 	var collaborators []struct {
 		UserID            string `json:"user_id"`
 		FullName          string `json:"full_name"`
@@ -56,7 +56,6 @@ func GetSpaceDashboard(c *gin.Context) {
 		CanSearchContent  bool   `json:"can_search_content"`
 		CanChangeSettings bool   `json:"can_change_settings"`
 		CanManagePlans    bool   `json:"can_manage_plans"`
-		CanManageCycles   bool   `json:"can_manage_cycles"`
 		CanManageQuizzes  bool   `json:"can_manage_quizzes"`
 	}
 
@@ -68,7 +67,7 @@ func GetSpaceDashboard(c *gin.Context) {
             space_permissions.can_manage_tags, space_permissions.can_manage_members, 
             space_permissions.can_send_invites, space_permissions.can_search_content, 
             space_permissions.can_change_settings, space_permissions.can_manage_plans, 
-            space_permissions.can_manage_cycles, space_permissions.can_manage_quizzes`).
+            space_permissions.can_manage_quizzes`).
 		Joins("join users on users.id = space_permissions.user_id").
 		Where("space_permissions.space_id = ?", spaceID).
 		Scan(&collaborators)
@@ -91,7 +90,6 @@ func GetSpaceDashboard(c *gin.Context) {
 			CanSearchContent  bool   `json:"can_search_content"`
 			CanChangeSettings bool   `json:"can_change_settings"`
 			CanManagePlans    bool   `json:"can_manage_plans"`
-			CanManageCycles   bool   `json:"can_manage_cycles"`
 			CanManageQuizzes  bool   `json:"can_manage_quizzes"`
 		}{}
 	}
@@ -156,21 +154,12 @@ func GetSpaceDashboard(c *gin.Context) {
 		notebookPermissions = []models.NotebookPermission{}
 	}
 
-	// 5. Todos os Ciclos (Ativos e Inativos) COM AS MATÉRIAS
-	var cycles []models.StudyCycle
-	database.DB.Preload("Items").Where("space_id = ?", spaceID).Find(&cycles)
-
-	var activeCycle interface{} = nil
-	for _, cycle := range cycles {
-		if cycle.IsActive {
-			activeCycle = cycle
-			break
-		}
-	}
-
-	// 6. Planos de Estudo (Agenda Completa DO SPACE)
-	var studyPlans []models.StudyPlan
-	database.DB.Where("space_id = ?", spaceID).Find(&studyPlans)
+	// =========================================================
+	// 🎯 5 E 6. O NOVO MOTOR DE ESTUDOS UNIFICADO
+	// =========================================================
+	var strategy models.StudyStrategy
+	database.DB.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy)
+	// Se a strategy não for encontrada, o GORM deixa a struct vazia, o que é seguro pro JSON.
 
 	// 7. Notas Rápidas / Post-its
 	var quickNotes []models.QuickNote
@@ -223,24 +212,25 @@ func GetSpaceDashboard(c *gin.Context) {
 	// =========================================================
 	// 🌟 8.5 INJEÇÃO EXTRA: DADOS GLOBAIS DO USUÁRIO LOGADO
 	// =========================================================
-	var qtdNotebooks, qtdNotes, qtdCycles int64
+	var qtdNotebooks, qtdNotes, qtdStrategies int64
 	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", loggedUserID).Count(&qtdNotebooks)
-	database.DB.Model(&models.StudyCycle{}).Where("created_by_id = ?", loggedUserID).Count(&qtdCycles)
+	database.DB.Model(&models.StudyStrategy{}).Where("created_by_id = ?", loggedUserID).Count(&qtdStrategies)
+
 	database.DB.Table("quick_notes").
 		Joins("JOIN spaces ON spaces.id = quick_notes.space_id").
 		Where("spaces.owner_id = ?", loggedUserID).
 		Count(&qtdNotes)
 
-	var globalStudyPlans []models.StudyPlan
-	database.DB.Table("study_plans").
-		Select("DISTINCT study_plans.*").
-		Joins("JOIN spaces ON spaces.id = study_plans.space_id").
+	var globalStudyStrategies []models.StudyStrategy
+	database.DB.Preload("Blocks").
+		Joins("JOIN spaces ON spaces.id = study_strategies.space_id").
 		Joins("LEFT JOIN space_permissions ON space_permissions.space_id = spaces.id").
 		Where("spaces.owner_id = ? OR space_permissions.user_id = ?", loggedUserID, loggedUserID).
-		Find(&globalStudyPlans)
+		Group("study_strategies.id").
+		Find(&globalStudyStrategies)
 
-	if globalStudyPlans == nil {
-		globalStudyPlans = []models.StudyPlan{}
+	if globalStudyStrategies == nil {
+		globalStudyStrategies = []models.StudyStrategy{}
 	}
 
 	var guestSpaces []struct {
@@ -279,19 +269,20 @@ func GetSpaceDashboard(c *gin.Context) {
 		"collaborators":        collaborators,
 		"notebooks":            notebooks,
 		"notebook_permissions": notebookPermissions,
-		"all_cycles":           cycles,
-		"active_cycle":         activeCycle,
-		"space_study_plans":    studyPlans,
-		"quick_notes":          quickNotes,
-		"quizzes":              quizzes,
+
+		// 👇 A MÁGICA DA UNIFICAÇÃO (Substitui os velhos all_cycles, active_cycle e space_study_plans)
+		"study_strategy": strategy,
+
+		"quick_notes": quickNotes,
+		"quizzes":     quizzes,
 
 		// 👇 DADOS EXTRAS GLOBAIS
 		"usage_stats": gin.H{
-			"qtd_notebooks": qtdNotebooks,
-			"qtd_notes":     qtdNotes,
-			"qtd_cycles":    qtdCycles,
+			"qtd_notebooks":  qtdNotebooks,
+			"qtd_notes":      qtdNotes,
+			"qtd_strategies": qtdStrategies, // Mudou o nome aqui também
 		},
-		"global_study_plans": globalStudyPlans,
-		"guest_spaces":       guestSpaces,
+		"global_strategies": globalStudyStrategies, // E aqui
+		"guest_spaces":      guestSpaces,
 	})
 }

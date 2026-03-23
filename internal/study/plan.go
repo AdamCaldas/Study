@@ -1,8 +1,11 @@
 package study
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -10,147 +13,50 @@ import (
 	"github.com/google/uuid"
 )
 
-type CreateStudyPlanInput struct {
-	DayOfWeek  int       `json:"day_of_week" binding:"required"` // 0 = Domingo, 1 = Segunda...
-	StartTime  string    `json:"start_time" binding:"required"`  // Ex: "08:00"
-	EndTime    string    `json:"end_time" binding:"required"`    // Ex: "10:00"
-	NotebookID uuid.UUID `json:"notebook_id"`
-	Activity   string    `json:"activity"` // Caso não seja um caderno, pode ser só um texto ex: "Revisão Geral"
+// ==========================================================
+// 📥 ESTRUTURAS DE ENTRADA (O novo Payload Unificado)
+// ==========================================================
+
+type DisciplineInput struct {
+	NotebookID  *uuid.UUID `json:"notebook_id"`
+	Name        string     `json:"name"`
+	Importance  int        `json:"importance"`
+	Performance int        `json:"performance"`
 }
 
-func CreateStudyPlan(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	spaceID := c.Param("space_id")
-
-	// 1. Valida se o usuário é dono do Space
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
-		return
-	}
-
-	// 2. Valida a entrada de dados do Frontend
-	var input CreateStudyPlanInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: verifique os horários e o dia da semana"})
-		return
-	}
-
-	// 3. Monta o bloco do cronograma
-	parsedSpaceID, _ := uuid.Parse(spaceID)
-	newPlan := models.StudyPlan{
-		SpaceID:    parsedSpaceID,
-		DayOfWeek:  input.DayOfWeek,
-		StartTime:  input.StartTime,
-		EndTime:    input.EndTime,
-		NotebookID: input.NotebookID,
-		Activity:   input.Activity,
-	}
-
-	// 4. Salva no banco de dados
-	if err := database.DB.Create(&newPlan).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar horário no cronograma"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Horário adicionado ao cronograma com sucesso!",
-		"plan":    newPlan,
-	})
+type DailyScheduleInput struct {
+	DayOfWeek  int    `json:"day_of_week"`
+	WakeUpTime string `json:"wake_up_time"`
+	SleepTime  string `json:"sleep_time"`
+	WorkStart  string `json:"work_start"`
+	WorkEnd    string `json:"work_end"`
+	LunchStart string `json:"lunch_start"`
+	LunchEnd   string `json:"lunch_end"`
 }
 
-// ListPlans - Lista os planos de estudo (agenda semanal) do Space
-func ListPlans(c *gin.Context) {
-	spaceID := c.Param("space_id")
-
-	// 1. Pega o ID do usuário logado
-	userIDContext, _ := c.Get("userID")
-	userIDStr := fmt.Sprintf("%v", userIDContext)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
-		return
-	}
-
-	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
-	var space models.Space
-	var permission models.SpacePermission
-
-	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
-	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
-
-	// Se não for dono e não for convidado, BLOQUEIA!
-	if !isOwner && !isGuest {
-		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver a Agenda deste Space."})
-		return
-	}
-
-	// 3. BUSCA OS PLANOS (Agenda)
-	var plans []models.StudyPlan
-	if err := database.DB.Where("space_id = ?", spaceID).Find(&plans).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao carregar a agenda", "detalhe": err.Error()})
-		return
-	}
-
-	// Devolve os planos para o Front-end
-	c.JSON(200, gin.H{"plans": plans})
+type GenerateStrategyInput struct {
+	Mode               string               `json:"mode" binding:"required"`
+	TargetGoal         string               `json:"target_goal"`
+	HoursPerDay        float64              `json:"hours_per_day"`
+	DailyAvailability  []DailyScheduleInput `json:"daily_availability" binding:"required"`
+	FreeTimePreference int                  `json:"free_time_preference"`
+	MinSessionMin      int                  `json:"min_session_minutes"`
+	MaxSessionMin      int                  `json:"max_session_minutes"`
+	Disciplines        []DisciplineInput    `json:"disciplines" binding:"required"`
 }
 
-type UpdateStudyPlanInput struct {
-	DayOfWeek  int       `json:"day_of_week"`
-	StartTime  string    `json:"start_time"`
-	EndTime    string    `json:"end_time"`
-	Activity   string    `json:"activity"`
-	NotebookID uuid.UUID `json:"notebook_id"`
-}
-
-func UpdateStudyPlan(c *gin.Context) {
-	planID := c.Param("plan_id")
-	var input UpdateStudyPlanInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos"})
-		return
-	}
-
-	if err := database.DB.Model(&models.StudyPlan{}).Where("id = ?", planID).Updates(models.StudyPlan{
-		DayOfWeek:  input.DayOfWeek,
-		StartTime:  input.StartTime,
-		EndTime:    input.EndTime,
-		Activity:   input.Activity,
-		NotebookID: input.NotebookID,
-	}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao atualizar cronograma", "detalhe": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "Cronograma atualizado!"})
-}
-
-func DeleteStudyPlan(c *gin.Context) {
-	planID := c.Param("plan_id")
-	if err := database.DB.Where("id = ?", planID).Delete(&models.StudyPlan{}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao apagar atividade", "detalhe": err.Error()})
-		return
-	}
-	c.JSON(200, gin.H{"message": "Atividade removida do cronograma!"})
+type CreateManualBlockInput struct {
+	DayOfWeek  *int       `json:"day_of_week"`
+	StartTime  *string    `json:"start_time"`
+	EndTime    *string    `json:"end_time"`
+	Activity   string     `json:"activity" binding:"required"`
+	NotebookID *uuid.UUID `json:"notebook_id"`
 }
 
 // ==========================================================
-// 🤖 NOVO FLUXO: GERADOR AUTOMÁTICO DE PLANO DE ESTUDOS
+// 🧮 FUNÇÕES AUXILIARES (Matemática e Tempo)
 // ==========================================================
 
-// Estrutura que o Front-end vai nos enviar
-type AutoPlanInput struct {
-	WakeUpTime         string `json:"wake_up_time" binding:"required"`   // Ex: "07:00"
-	SleepTime          string `json:"sleep_time" binding:"required"`     // Ex: "23:00"
-	WorkStart          string `json:"work_start"`                        // Ex: "08:00"
-	WorkEnd            string `json:"work_end"`                          // Ex: "18:00"
-	LunchStart         string `json:"lunch_start"`                       // Ex: "12:00"
-	LunchEnd           string `json:"lunch_end"`                         // Ex: "13:00"
-	FreeTimePreference int    `json:"free_time_preference"`              // Minutos de lazer exigidos por dia (Ex: 60)
-	DaysAvailable      []int  `json:"days_available" binding:"required"` // Ex: [1, 2, 3, 4, 5] (Segunda a Sexta)
-}
-
-// Funções auxiliares para converter horas em minutos e vice-versa
 func timeToMinutes(t string) int {
 	if t == "" {
 		return 0
@@ -166,197 +72,327 @@ func minutesToTime(m int) string {
 	return fmt.Sprintf("%02d:%02d", h, mins)
 }
 
-// A Rota Principal
+func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
+	var totalWeight float64 = 0
+	var calculatedBlocks []models.StudyBlock
+	sequence := 1
+
+	weights := make([]float64, len(disciplines))
+	for i, disc := range disciplines {
+		w := float64(disc.Importance + (6 - disc.Performance))
+		weights[i] = w
+		totalWeight += w
+	}
+
+	for i, disc := range disciplines {
+		proportion := weights[i] / totalWeight
+		suggestedMin := int(math.Round(proportion * dailyMin))
+
+		if minSess > 0 && suggestedMin < minSess {
+			suggestedMin = minSess
+		}
+
+		blocksNeeded := 1
+		if maxSess > 0 && suggestedMin > maxSess {
+			blocksNeeded = int(math.Ceil(float64(suggestedMin) / float64(maxSess)))
+			suggestedMin = suggestedMin / blocksNeeded
+		}
+
+		for b := 0; b < blocksNeeded; b++ {
+			calculatedBlocks = append(calculatedBlocks, models.StudyBlock{
+				NotebookID:       disc.NotebookID,
+				Activity:         "Estudar: " + disc.Name,
+				Importance:       disc.Importance,
+				Performance:      disc.Performance,
+				SuggestedMinutes: suggestedMin,
+				Sequence:         sequence,
+			})
+			sequence++
+		}
+	}
+	return calculatedBlocks
+}
+
+// ==========================================================
+// 🚀 1. O MOTOR UNIFICADO (Gera Ciclo ou Cronograma)
+// ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, err := uuid.Parse(spaceIDStr)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		c.JSON(400, gin.H{"error": "ID do Space inválido"})
 		return
 	}
 
-	var input AutoPlanInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: Verifique os horários enviados."})
-		return
-	}
-
-	// Busca se a turma tem um Ciclo de Estudos Ativo para puxarmos os nomes das matérias
-	var activeCycle models.StudyCycle
-	database.DB.Preload("Items").Where("space_id = ? AND is_active = true", spaceID).First(&activeCycle)
-
-	var generatedPlans []models.StudyPlan
-	subjectIndex := 0
-
-	// Variáveis de tempo em minutos
-	wake := timeToMinutes(input.WakeUpTime)
-	sleep := timeToMinutes(input.SleepTime)
-	if sleep < wake { // Caso ele durma depois da meia-noite (Ex: 01:00)
-		sleep += 1440
-	}
-	workStart := timeToMinutes(input.WorkStart)
-	workEnd := timeToMinutes(input.WorkEnd)
-	lunchStart := timeToMinutes(input.LunchStart)
-	lunchEnd := timeToMinutes(input.LunchEnd)
-
-	// Gera o plano para cada dia selecionado
-	for _, day := range input.DaysAvailable {
-		// Cria uma linha do tempo de 24h (1440 minutos)
-		// true = Ocupado, false = Livre
-		timeline := make([]bool, 1440*2) // *2 para lidar com dias que viram a madrugada
-
-		// 1. Bloqueia o tempo de sono
-		for i := 0; i < wake; i++ {
-			timeline[i] = true
-		}
-		for i := sleep; i < len(timeline); i++ {
-			timeline[i] = true
-		}
-
-		// 2. Bloqueia o trabalho/escola
-		if workStart > 0 && workEnd > workStart {
-			for i := workStart; i < workEnd; i++ {
-				timeline[i] = true
-			}
-		}
-
-		// 3. Bloqueia o almoço
-		if lunchStart > 0 && lunchEnd > lunchStart {
-			for i := lunchStart; i < lunchEnd; i++ {
-				timeline[i] = true
-			}
-		}
-
-		// 4. Extrai os blocos livres (Mágica do Algoritmo)
-		var freeBlocks [][]int
-		startFree := -1
-		for i := wake; i < sleep; i++ {
-			if !timeline[i] && startFree == -1 {
-				startFree = i
-			} else if timeline[i] && startFree != -1 {
-				freeBlocks = append(freeBlocks, []int{startFree, i})
-				startFree = -1
-			}
-		}
-		if startFree != -1 { // Se o dia terminar livre
-			freeBlocks = append(freeBlocks, []int{startFree, sleep})
-		}
-
-		// 5. Deduz o tempo livre (lazer) do último bloco do dia
-		lazerRestante := input.FreeTimePreference
-		if lazerRestante > 0 && len(freeBlocks) > 0 {
-			lastBlockIndex := len(freeBlocks) - 1
-			blockDuration := freeBlocks[lastBlockIndex][1] - freeBlocks[lastBlockIndex][0]
-
-			if blockDuration > lazerRestante {
-				freeBlocks[lastBlockIndex][1] -= lazerRestante
-			} else {
-				// Se o lazer pedido for maior que o ultimo bloco inteiro, cancela o bloco
-				freeBlocks = freeBlocks[:lastBlockIndex]
-			}
-		}
-
-		// 6. Fatiar os blocos grandes em Sessões de Estudo (Ex: 50 minutos estudo + 10 min pausa)
-		sessionLength := 50
-		breakLength := 10
-
-		for _, block := range freeBlocks {
-			currentTime := block[0]
-			endTime := block[1]
-
-			for currentTime+sessionLength <= endTime {
-				// Define qual matéria estudar puxando da roleta do ciclo ativo
-				activityName := "Sessão de Estudo"
-				var notebookID *uuid.UUID = nil
-
-				if len(activeCycle.Items) > 0 {
-					item := activeCycle.Items[subjectIndex%len(activeCycle.Items)]
-					if item.Name != "" {
-						activityName = "Estudar: " + item.Name
-					}
-					notebookID = item.NotebookID
-					subjectIndex++
-				}
-
-				// Salva no banco de dados
-				newPlan := models.StudyPlan{
-					SpaceID:   spaceID,
-					DayOfWeek: day,
-					StartTime: minutesToTime(currentTime),
-					EndTime:   minutesToTime(currentTime + sessionLength),
-					Activity:  activityName,
-				}
-				if notebookID != nil {
-					newPlan.NotebookID = *notebookID
-				}
-
-				database.DB.Create(&newPlan)
-				generatedPlans = append(generatedPlans, newPlan)
-
-				// Avança o tempo (Sessão + Pausa)
-				currentTime += sessionLength + breakLength
-			}
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message":       "Plano de estudos gerado automaticamente com sucesso!",
-		"plans_created": len(generatedPlans),
-		"agenda":        generatedPlans,
-	})
-}
-
-// 1. Nova estrutura para receber uma lista do Frontend
-type CreateMultipleStudyPlansInput struct {
-	Plans []CreateStudyPlanInput `json:"plans" binding:"required"`
-}
-
-// 2. Nova Função para criar vários de uma vez
-func CreateMultipleStudyPlans(c *gin.Context) {
 	userID, _ := c.Get("userID")
-	spaceID := c.Param("space_id")
 
-	// Valida se o usuário é dono do Space
-	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado a este Space"})
-		return
-	}
-
-	var input CreateMultipleStudyPlansInput
+	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: envie uma lista de planos"})
+		c.JSON(400, gin.H{"error": "Dados inválidos enviados pelo front-end."})
 		return
 	}
 
-	parsedSpaceID, _ := uuid.Parse(spaceID)
-	var createdPlans []models.StudyPlan
-
-	// Inicia uma Transação no banco (ou tudo salva ou nada salva, mais seguro)
 	tx := database.DB.Begin()
 
-	for _, item := range input.Plans {
-		newPlan := models.StudyPlan{
-			SpaceID:    parsedSpaceID,
-			DayOfWeek:  item.DayOfWeek,
-			StartTime:  item.StartTime,
-			EndTime:    item.EndTime,
-			NotebookID: item.NotebookID,
-			Activity:   item.Activity,
-		}
-
-		if err := tx.Create(&newPlan).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar um dos horários"})
-			return
-		}
-		createdPlans = append(createdPlans, newPlan)
+	var strategy models.StudyStrategy
+	if err := tx.Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+		strategy = models.StudyStrategy{SpaceID: spaceID}
+		tx.Create(&strategy)
 	}
 
+	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
+
+	for i, disc := range input.Disciplines {
+		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
+			newNb := models.Notebook{
+				SpaceID:     spaceID,
+				Name:        disc.Name,
+				ColorHex:    "#8B5CF6",
+				CreatedByID: userID.(uuid.UUID),
+				UpdatedByID: userID.(uuid.UUID),
+			}
+			tx.Create(&newNb)
+			input.Disciplines[i].NotebookID = &newNb.ID
+		}
+	}
+
+	availDaysJSON, _ := json.Marshal(input.DailyAvailability)
+	strategy.Mode = input.Mode
+	strategy.TargetGoal = input.TargetGoal
+	strategy.HoursPerDay = input.HoursPerDay
+	strategy.DailyAvailability = string(availDaysJSON)
+	strategy.FreeTimePreference = input.FreeTimePreference
+	strategy.MinSessionMin = input.MinSessionMin
+	strategy.MaxSessionMin = input.MaxSessionMin
+	tx.Save(&strategy)
+
+	dailyMinutes := input.HoursPerDay * 60
+	baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
+	var finalBlocks []models.StudyBlock
+
+	if input.Mode == "adaptive" {
+		for _, block := range baseBlocks {
+			block.StrategyID = strategy.ID
+			finalBlocks = append(finalBlocks, block)
+		}
+
+	} else {
+		subjectIndex := 0
+		sessionLength := input.MaxSessionMin
+		if sessionLength == 0 {
+			sessionLength = 50
+		}
+		breakLength := 10
+
+		// 🧙‍♂️ MÁGICA ATUALIZADA: Iterando sobre as configurações INDIVIDUAIS de cada dia
+		for _, dayConfig := range input.DailyAvailability {
+			timeline := make([]bool, 1440*2)
+
+			wake := timeToMinutes(dayConfig.WakeUpTime)
+			sleep := timeToMinutes(dayConfig.SleepTime)
+			if sleep < wake {
+				sleep += 1440
+			}
+			workStart := timeToMinutes(dayConfig.WorkStart)
+			workEnd := timeToMinutes(dayConfig.WorkEnd)
+			lunchStart := timeToMinutes(dayConfig.LunchStart)
+			lunchEnd := timeToMinutes(dayConfig.LunchEnd)
+
+			for i := 0; i < wake; i++ {
+				timeline[i] = true
+			}
+			for i := sleep; i < len(timeline); i++ {
+				timeline[i] = true
+			}
+			if workStart > 0 && workEnd > workStart {
+				for i := workStart; i < workEnd; i++ {
+					timeline[i] = true
+				}
+			}
+			if lunchStart > 0 && lunchEnd > lunchStart {
+				for i := lunchStart; i < lunchEnd; i++ {
+					timeline[i] = true
+				}
+			}
+
+			var freeBlocks [][]int
+			startFree := -1
+			for i := wake; i < sleep; i++ {
+				if !timeline[i] && startFree == -1 {
+					startFree = i
+				} else if timeline[i] && startFree != -1 {
+					freeBlocks = append(freeBlocks, []int{startFree, i})
+					startFree = -1
+				}
+			}
+			if startFree != -1 {
+				freeBlocks = append(freeBlocks, []int{startFree, sleep})
+			}
+
+			lazerRestante := input.FreeTimePreference
+			if lazerRestante > 0 && len(freeBlocks) > 0 {
+				lastBlockIndex := len(freeBlocks) - 1
+				blockDuration := freeBlocks[lastBlockIndex][1] - freeBlocks[lastBlockIndex][0]
+
+				if blockDuration > lazerRestante {
+					freeBlocks[lastBlockIndex][1] -= lazerRestante
+				} else {
+					freeBlocks = freeBlocks[:lastBlockIndex]
+				}
+			}
+
+			for _, fb := range freeBlocks {
+				curr := fb[0]
+				limit := fb[1]
+
+				for curr+sessionLength <= limit {
+					if len(baseBlocks) == 0 {
+						break
+					}
+					baseBlock := baseBlocks[subjectIndex%len(baseBlocks)]
+
+					dayCopy := dayConfig.DayOfWeek // Pega o dia correto da config
+					startCopy := minutesToTime(curr)
+					endCopy := minutesToTime(curr + sessionLength)
+
+					newBlock := models.StudyBlock{
+						StrategyID: strategy.ID,
+						NotebookID: baseBlock.NotebookID,
+						Activity:   baseBlock.Activity,
+						DayOfWeek:  &dayCopy,
+						StartTime:  &startCopy,
+						EndTime:    &endCopy,
+					}
+					finalBlocks = append(finalBlocks, newBlock)
+
+					subjectIndex++
+					curr += sessionLength + breakLength
+				}
+			}
+		}
+	}
+
+	if len(finalBlocks) > 0 {
+		tx.Create(&finalBlocks)
+	}
 	tx.Commit()
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": fmt.Sprintf("%d horários adicionados com sucesso!", len(createdPlans)),
-		"plans":   createdPlans,
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Estratégia configurada com sucesso!",
+		"strategy": strategy,
+		"blocks":   finalBlocks,
 	})
+}
+
+// ==========================================================
+// 📋 2. LISTAR ESTRATÉGIA E BLOCOS
+// ==========================================================
+func ListPlans(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	var strategy models.StudyStrategy
+	if err := database.DB.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+		c.JSON(200, gin.H{"message": "Nenhuma estratégia configurada ainda", "strategy": nil})
+		return
+	}
+
+	c.JSON(200, gin.H{"strategy": strategy})
+}
+
+// ==========================================================
+// ✏️ 3. CRUD MANUAL DOS BLOCOS
+// ==========================================================
+func CreateStudyPlan(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+	var input CreateManualBlockInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	var strategy models.StudyStrategy
+	database.DB.Where("space_id = ?", spaceIDStr).First(&strategy)
+	if strategy.ID == uuid.Nil {
+		c.JSON(400, gin.H{"error": "Você precisa gerar uma estratégia base primeiro."})
+		return
+	}
+
+	newBlock := models.StudyBlock{
+		StrategyID: strategy.ID,
+		DayOfWeek:  input.DayOfWeek,
+		StartTime:  input.StartTime,
+		EndTime:    input.EndTime,
+		Activity:   input.Activity,
+		NotebookID: input.NotebookID,
+	}
+
+	database.DB.Create(&newBlock)
+	c.JSON(201, gin.H{"message": "Bloco adicionado!", "block": newBlock})
+}
+
+func CreateMultipleStudyPlans(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+	var input struct {
+		Plans []CreateManualBlockInput `json:"plans"`
+	}
+	c.ShouldBindJSON(&input)
+
+	var strategy models.StudyStrategy
+	database.DB.Where("space_id = ?", spaceIDStr).First(&strategy)
+
+	var blocks []models.StudyBlock
+	for _, p := range input.Plans {
+		blocks = append(blocks, models.StudyBlock{
+			StrategyID: strategy.ID,
+			DayOfWeek:  p.DayOfWeek,
+			StartTime:  p.StartTime,
+			EndTime:    p.EndTime,
+			Activity:   p.Activity,
+			NotebookID: p.NotebookID,
+		})
+	}
+	database.DB.Create(&blocks)
+	c.JSON(201, gin.H{"message": "Blocos salvos com sucesso!"})
+}
+
+func UpdateStudyPlan(c *gin.Context) {
+	blockID := c.Param("plan_id")
+	var input CreateManualBlockInput
+	c.ShouldBindJSON(&input)
+
+	database.DB.Model(&models.StudyBlock{}).Where("id = ?", blockID).Updates(map[string]interface{}{
+		"day_of_week": input.DayOfWeek,
+		"start_time":  input.StartTime,
+		"end_time":    input.EndTime,
+		"activity":    input.Activity,
+		"notebook_id": input.NotebookID,
+	})
+	c.JSON(200, gin.H{"message": "Bloco atualizado"})
+}
+
+func DeleteStudyPlan(c *gin.Context) {
+	blockID := c.Param("plan_id")
+	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
+	c.JSON(200, gin.H{"message": "Bloco removido"})
+}
+
+// ==========================================================
+// 🔄 4. AVANÇAR PASSO (Para o modo Adaptive)
+// ==========================================================
+func AdvanceStrategyStep(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	var strategy models.StudyStrategy
+
+	if err := database.DB.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+		c.JSON(404, gin.H{"error": "Estratégia não encontrada"})
+		return
+	}
+
+	totalItems := len(strategy.Blocks)
+	if totalItems > 0 {
+		strategy.CurrentStep = (strategy.CurrentStep + 1) % totalItems
+		database.DB.Save(&strategy)
+	}
+
+	c.JSON(200, gin.H{"message": "Avançado!", "current_step": strategy.CurrentStep})
 }

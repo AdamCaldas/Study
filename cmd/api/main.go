@@ -57,8 +57,8 @@ func main() {
 	router.POST("/v1/register", auth.Register)
 	router.POST("/v1/verify-email", auth.VerifyEmailCode)
 	router.POST("/v1/login", auth.Login)
-	router.POST("/v1/forgot-password", auth.ForgotPassword) // 👈 ESQUECI A SENHA
-	router.POST("/v1/reset-password", auth.ResetPassword)   // 👈 SALVAR NOVA SENHA
+	router.POST("/v1/forgot-password", auth.ForgotPassword)
+	router.POST("/v1/reset-password", auth.ResetPassword)
 
 	// ==========================================================
 	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO (Requer JWT)
@@ -69,7 +69,7 @@ func main() {
 		// 👉 Conta e Perfil
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
-		protected.PATCH("/me/settings", users.UpdateMySettings) // ⚙️ NOVO: Rota do botão de Settings
+		protected.PATCH("/me/settings", users.UpdateMySettings)
 		protected.PUT("/me/password", users.UpdatePassword)
 		protected.DELETE("/me", users.DeleteMyAccount)
 		protected.POST("/me/become-teacher", users.BecomeTeacher)
@@ -81,7 +81,7 @@ func main() {
 		// 👉 Notificações e Suporte (Bugs)
 		protected.GET("/notifications", admin.GetMyNotifications)
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
-		protected.POST("/bugs", admin.ReportBug) // 🐛 NOVO: Usuário reporta um problema
+		protected.POST("/bugs", admin.ReportBug)
 
 		// 👉 Rede Social (Vitrine)
 		protected.GET("/teachers/:id", users.GetTeacherProfile)
@@ -96,9 +96,9 @@ func main() {
 		// 👉 Gestão Macro de Spaces (Turmas)
 		protected.POST("/spaces", auth.CheckSpaceLimit(), space.CreateSpace)
 		protected.GET("/spaces", space.ListSpaces)
-		protected.GET("/spaces/code/:code", space.GetSpaceByCode)        // Preview de Convite
-		protected.POST("/spaces/join", space.RequestSpaceAccess)         // Sala de Espera
-		protected.POST("/attendance/check-in", space.RegisterAttendance) // Bater ponto via QR Code
+		protected.GET("/spaces/code/:code", space.GetSpaceByCode)
+		protected.POST("/spaces/join", space.RequestSpaceAccess)
+		protected.POST("/attendance/check-in", space.RegisterAttendance)
 
 		// 👉 Organização Externa de Cadernos (Pastas e Guias)
 		protected.POST("/notebooks/:notebook_id/guides", notebook.CreateGuide)
@@ -115,7 +115,7 @@ func main() {
 		dashboardRoutes := protected.Group("/dashboard/:space_id")
 		dashboardRoutes.Use(auth.CheckSpaceAccess())
 		{
-			dashboardRoutes.GET("", space.GetSpaceDashboard) // Agregador principal de dados
+			dashboardRoutes.GET("", space.GetSpaceDashboard)
 		}
 
 		spaceRoutes := protected.Group("/spaces/:space_id")
@@ -141,21 +141,16 @@ func main() {
 			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
-			// 👉 Motor de Estudos (Planos e Ciclos)
-			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan) // 🤖 NOVO: Gerador automático
-			spaceRoutes.GET("/plans", study.ListPlans)                       // 📋 NOVO: Listar grade
-			spaceRoutes.POST("/plans", study.CreateStudyPlan)                // Criar bloco manual
-			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans) // 🚀 ADICIONADO AQUI
-			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
-			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
-
-			spaceRoutes.POST("/cycles", study.CreateStudyCycle)
-			spaceRoutes.GET("/cycles", study.ListStudyCycles)
-			spaceRoutes.PUT("/cycles/:cycle_id", study.UpdateStudyCycle)
-			spaceRoutes.DELETE("/cycles/:cycle_id", study.DeleteStudyCycle)
-			spaceRoutes.PATCH("/cycles/:cycle_id/advance", study.AdvanceCycleStep)
-			spaceRoutes.PATCH("/cycles/:cycle_id/activate", study.ActivateCycle)
-			spaceRoutes.POST("/cycles/simulate", study.SimulateStudyCycle)
+			// =======================================================
+			// 👉 NOVO MOTOR DE ESTUDOS UNIFICADO (Strategy e Blocks)
+			// =======================================================
+			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan) // 🤖 O Super Gerador (Fixed ou Adaptive)
+			spaceRoutes.GET("/plans", study.ListPlans)                       // 📋 Listar a Estratégia e seus Blocos
+			spaceRoutes.POST("/plans", study.CreateStudyPlan)                // ➕ Criar um bloco manual
+			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans) // 📦 Criar vários blocos
+			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)        // ✏️ Editar bloco
+			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)     // 🗑️ Apagar bloco
+			spaceRoutes.PATCH("/plans/advance", study.AdvanceStrategyStep)   // 🔄 Girar a roleta (Modo Adaptive)
 
 			// 👉 Avaliações e Anti-Cola
 			spaceRoutes.POST("/reviews", study.CreateReview)

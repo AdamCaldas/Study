@@ -35,15 +35,21 @@ func ConnectDB() {
 	}
 
 	// 🛡️ BLINDAGEM DO POOL DE CONEXÕES (Turbo no Banco)
-	// Máximo de conexões abertas ao mesmo tempo (50 para o Supabase free)
 	sqlDB.SetMaxOpenConns(50)
-	// Máximo de conexões "dormindo" guardadas na memória para respostas super rápidas
 	sqlDB.SetMaxIdleConns(10)
-	// Tempo máximo que uma conexão pode ficar aberta antes de ser reciclada
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	DB = db
 	log.Println("✅ Conexão com PostgreSQL (Pooler) estabelecida com sucesso!")
+
+	// ==========================================================
+	// 🧹 LIXEIRA TEMPORÁRIA (Limpeza da Unificação)
+	// ==========================================================
+	// DICA DE SÊNIOR: Deixe esse código rodar UMA VEZ quando você iniciar o servidor.
+	// Ele vai limpar a "sujeira" das tabelas antigas do banco de dados.
+	// Depois que rodar com sucesso a primeira vez, você pode apagar esta linha se quiser.
+	log.Println("Limpando tabelas antigas de ciclo e plano...")
+	db.Migrator().DropTable("study_cycles", "study_cycle_items", "study_plans")
 
 	// --- MIGRATIONS ---
 	log.Println("Rodando as Migrations do banco de dados...")
@@ -53,10 +59,10 @@ func ConnectDB() {
 		&models.SpacePermission{},
 		&models.Notebook{},
 		&models.Page{},
+		&models.PageNote{}, // 📝 NOVO: Notas da Página
 		&models.QuickNote{},
-		&models.StudyCycle{},
-		&models.StudyCycleItem{},
-		&models.StudyPlan{},
+		&models.StudyStrategy{}, // 🧠 NOVO: Motor Unificado (A Estratégia Mestra)
+		&models.StudyBlock{},    // 🧱 NOVO: Blocos de Estudo (Os horários/roleta)
 		&models.PomodoroSession{},
 		&models.MoodCheckIn{},
 		&models.SpaceTag{},
@@ -67,31 +73,30 @@ func ConnectDB() {
 		&models.Quiz{},
 		&models.QuizQuestion{},
 		&models.SpaceJoinRequest{},
-		&models.Notification{},       // Tabela de Notificações Gerais
-		&models.NotificationRead{},   // Controle de Lidos do Sino
-		&models.NotebookPermission{}, // Permissões de caderno
-		&models.GamificationRule{},   // Regras de XP
-		&models.Guide{},              // Guias dos Cadernos
-		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
-		&models.BugReport{},          // 🐛 Sistema de Feedback e Bugs
-		&models.VerificationCode{},   // 🔐 Tabela de Códigos de E-mail (NOVO)
-		&models.PasswordReset{},      // 👈 Essa belezinha tem que estar aqui!
+		&models.Notification{},
+		&models.NotificationRead{},
+		&models.NotebookPermission{},
+		&models.GamificationRule{},
+		&models.Guide{},
+		&models.BugReport{},
+		&models.VerificationCode{},
+		&models.PasswordReset{},
 
 		// ==========================================
-		// 👇 NOVAS TABELAS DAS FASES 1 A 7 👇
+		// 👇 FASES 1 A 7 👇
 		// ==========================================
-		&models.Follower{},          // Fase 1: Seguidores do Professor
-		&models.StudentDossier{},    // Fase 2: Notas Ocultas do Dossiê
-		&models.QuestionBankItem{},  // Fase 3: Banco de Questões Global
-		&models.FlashMission{},      // Fase 3: Missões Relâmpago
-		&models.MissionCompletion{}, // Fase 3: Controle de quem completou a missão
-		&models.Certificate{},       // Fase 4: Certificado de Conclusão (Diploma)
-		&models.PageDoubt{},         // Fase 5: Fórum e Plantão de Dúvidas
-		&models.AttendanceSession{}, // Fase 5: QR Code (Sessão aberta no Telão)
-		&models.AttendanceRecord{},  // Fase 5: QR Code (Lista de Presença do Aluno)
-		&models.Badge{},             // Fase 6: Emblemas (Badges) criados pelo prof
-		&models.UserBadge{},         // Fase 6: Emblemas ganhos pelo aluno
-		&models.AutomationRule{},    // Fase 7: Regras do Robô de Recuperação
+		&models.Follower{},
+		&models.StudentDossier{},
+		&models.QuestionBankItem{},
+		&models.FlashMission{},
+		&models.MissionCompletion{},
+		&models.Certificate{},
+		&models.PageDoubt{},
+		&models.AttendanceSession{},
+		&models.AttendanceRecord{},
+		&models.Badge{},
+		&models.UserBadge{},
+		&models.AutomationRule{},
 	)
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
