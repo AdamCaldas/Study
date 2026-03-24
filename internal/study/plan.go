@@ -153,13 +153,15 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// 👉 2. Destruição e Recriação da Estratégia
+	// 👉 2. Destruição e Recriação da Estratégia (Separado por MODE)
 	var strategy models.StudyStrategy
-	if err := tx.Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
-		strategy = models.StudyStrategy{SpaceID: spaceID}
+	// Ele procura se já existe uma estratégia DESSE MODO específico
+	if err := tx.Where("space_id = ? AND mode = ?", spaceID, input.Mode).First(&strategy).Error; err != nil {
+		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: input.Mode}
 		tx.Create(&strategy)
 	}
 
+	// Apaga só os blocos da estratégia DESTE MODO que estamos gerando
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
 	// Cria os cadernos vazios
@@ -338,26 +340,27 @@ func GenerateAutoPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR ESTRATÉGIA E BLOCOS (A Rota Correta!)
+// 📋 2. LISTAR ESTRATÉGIA E BLOCOS (Trazendo TODAS do Space)
 // ==========================================================
 func ListPlans(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	var strategy models.StudyStrategy
+	// Agora é um ARRAY (Fatia) para caber as duas!
+	var strategies []models.StudyStrategy
 
-	// A mágica: Puxamos os blocos já ordenados (Sequence pro ciclo, Dias pro Cronograma)
+	// A mágica: Puxamos TODAS as estratégias do Space e os blocos de cada uma
 	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
 		return db.Order("day_of_week ASC, start_time ASC, sequence ASC")
-	}).Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+	}).Where("space_id = ?", spaceID).Find(&strategies).Error; err != nil {
 		c.JSON(200, gin.H{
-			"message":        "Nenhuma estratégia configurada ainda",
-			"study_strategy": nil, // A CHAVE EXATA QUE O FRONT QUER
+			"message":          "Nenhuma estratégia configurada ainda",
+			"study_strategies": []models.StudyStrategy{}, // ARRAY VAZIO
 		})
 		return
 	}
 
 	c.JSON(200, gin.H{
-		"study_strategy": strategy, // A CHAVE EXATA QUE O FRONT QUER
+		"study_strategies": strategies, // A CHAVE AGORA É UM ARRAY COM O FIXED E ADAPTIVE!
 	})
 }
 
