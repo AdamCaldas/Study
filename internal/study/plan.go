@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ==========================================================
@@ -337,18 +338,27 @@ func GenerateAutoPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR ESTRATÉGIA E BLOCOS
+// 📋 2. LISTAR ESTRATÉGIA E BLOCOS (A Rota Correta!)
 // ==========================================================
 func ListPlans(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
 	var strategy models.StudyStrategy
-	if err := database.DB.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
-		c.JSON(200, gin.H{"message": "Nenhuma estratégia configurada ainda", "strategy": nil})
+
+	// A mágica: Puxamos os blocos já ordenados (Sequence pro ciclo, Dias pro Cronograma)
+	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day_of_week ASC, start_time ASC, sequence ASC")
+	}).Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
+		c.JSON(200, gin.H{
+			"message":        "Nenhuma estratégia configurada ainda",
+			"study_strategy": nil, // A CHAVE EXATA QUE O FRONT QUER
+		})
 		return
 	}
 
-	c.JSON(200, gin.H{"strategy": strategy})
+	c.JSON(200, gin.H{
+		"study_strategy": strategy, // A CHAVE EXATA QUE O FRONT QUER
+	})
 }
 
 // ==========================================================
