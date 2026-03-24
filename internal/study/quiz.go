@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -357,4 +358,24 @@ func ClaimCertificate(c *gin.Context) {
 		"message":     "Parabéns! Você concluiu o curso com sucesso.",
 		"certificate": newCert,
 	})
+}
+
+// ==========================================================
+// 📝 4. GET /spaces/:space_id/quizzes (Aba de Avaliações)
+// ==========================================================
+func ListSpaceQuizzes(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	var quizzes []models.Quiz
+	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
+
+	now := time.Now()
+	for i := range quizzes {
+		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
+			quizzes[i].IsLocked = true
+			quizzes[i].Questions = []models.QuizQuestion{} // Esconde as perguntas
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
 }

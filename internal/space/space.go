@@ -896,3 +896,47 @@ func ExportClassDiaryCSV(c *gin.Context) {
 	// 7. Envia o arquivo para o Front-end
 	c.Data(http.StatusOK, "text/csv", b.Bytes())
 }
+
+// ==========================================================
+// 🏠 1. GET /spaces/:space_id (O Novo Dashboard Leve)
+// ==========================================================
+func GetSpaceDetails(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	var space models.Space
+	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
+		return
+	}
+
+	var owner models.User
+	database.DB.Select("id, full_name, email, profile_pic").Where("id = ?", space.OwnerID).First(&owner)
+
+	var collaborators []map[string]interface{}
+	database.DB.Table("space_permissions").
+		Select("users.id as user_id, users.full_name, users.email, users.profile_pic, space_permissions.access_level").
+		Joins("join users on users.id = space_permissions.user_id").
+		Where("space_permissions.space_id = ?", spaceID).
+		Scan(&collaborators)
+
+	if collaborators == nil {
+		collaborators = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"space":         space,
+		"owner":         owner,
+		"collaborators": collaborators,
+	})
+}
+
+// ==========================================================
+// 📝 2. GET /spaces/:space_id/notes (Aba de Notas Rápidas)
+// ==========================================================
+func ListSpaceNotes(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	var quickNotes []models.QuickNote
+	database.DB.Where("space_id = ?", spaceID).Find(&quickNotes)
+
+	c.JSON(http.StatusOK, gin.H{"quick_notes": quickNotes})
+}

@@ -117,15 +117,17 @@ func main() {
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)
 		// ------------------------------------------------------
-		dashboardRoutes := protected.Group("/dashboard/:space_id")
-		dashboardRoutes.Use(auth.CheckSpaceAccess())
-		{
-			dashboardRoutes.GET("", space.GetSpaceDashboard)
-		}
-
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
+			// =======================================================
+			// ⚡ O NOVO PADRÃO "LAZY LOADING" (Mini-Rotas)
+			// =======================================================
+			spaceRoutes.GET("", space.GetSpaceDetails)                 // 🏠 Home da Turma (Ex-Dashboard)
+			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks) // 📚 Aba de Cadernos
+			spaceRoutes.GET("/notes", space.ListSpaceNotes)            // 📝 Aba de Post-its
+			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)        // 📝 Aba de Provas
+
 			// 👉 Setup e Moderação da Turma
 			spaceRoutes.PUT("", space.UpdateSpace)
 			spaceRoutes.DELETE("", space.DeleteSpace)
@@ -138,7 +140,7 @@ func main() {
 			spaceRoutes.GET("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 			spaceRoutes.PUT("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 
-			// 👉 Cadernos e Notas Rápidas
+			// 👉 Ações de Cadernos e Notas Rápidas
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
@@ -204,13 +206,11 @@ func main() {
 	godMode := router.Group("/v1/admin")
 	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
 	{
-		// 👉 Analytics Global
+		// (Rotas do Admin Global inalteradas...)
 		godMode.GET("/report", admin.GetPlatformReport)
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
-
-		// 👉 Gestão de Entidades
 		godMode.GET("/users", admin.ListAllUsers)
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)
@@ -219,33 +219,22 @@ func main() {
 		godMode.PUT("/spaces/:id/transfer", admin.TransferSpaceOwnership)
 		godMode.DELETE("/spaces/:id/collaborators/:user_id", admin.RemoveUserFromSpace)
 		godMode.DELETE("/spaces/:id", admin.DeleteAnySpace)
-
-		// 👉 Gamificação Global
 		godMode.PUT("/users/:id/xp", admin.UpdateUserXP)
 		godMode.GET("/gamification/rules", admin.ListGamificationRules)
 		godMode.POST("/gamification/rules", admin.CreateGamificationRule)
 		godMode.PUT("/gamification/rules/:rule_id", admin.UpdateGamificationRule)
-
-		// 👉 Notificações Globais
 		godMode.GET("/notifications", admin.ListAllNotifications)
 		godMode.POST("/notifications", admin.CreateNotification)
 		godMode.PUT("/notifications/:id", admin.UpdateNotification)
 		godMode.DELETE("/notifications/:id", admin.DeleteNotification)
-
-		// 👉 Central de Bugs e Suporte (NOVO Kanban)
 		godMode.GET("/bugs", admin.ListBugs)
 		godMode.PUT("/bugs/:id/status", admin.UpdateBugStatus)
-
-		// 👉 Gestão da Central de Ajuda (StudFy Academy)
 		godMode.POST("/help-center/categories", admin.CreateHelpCategory)
 		godMode.DELETE("/help-center/categories/:category_id", admin.DeleteHelpCategory)
 		godMode.POST("/help-center/articles", admin.CreateHelpArticle)
 		godMode.DELETE("/help-center/articles/:article_id", admin.DeleteHelpArticle)
 	}
 
-	// ==========================================================
-	// 🚀 INICIALIZAÇÃO DO SERVIDOR (Com Timeouts de Segurança)
-	// ==========================================================
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -254,9 +243,9 @@ func main() {
 	srv := &http.Server{
 		Addr:         ":" + port,
 		Handler:      router,
-		ReadTimeout:  10 * time.Second, // Evita slowloris attacks
-		WriteTimeout: 15 * time.Second, // Previne travamento de resposta
-		IdleTimeout:  60 * time.Second, // Otimiza uso de RAM
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	log.Printf("Iniciando servidor na porta %s...", port)

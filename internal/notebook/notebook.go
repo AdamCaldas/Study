@@ -2,6 +2,7 @@ package notebook
 
 import (
 	"net/http"
+	"time"
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -164,5 +165,31 @@ func ListNotebooks(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	var notebooks []models.Notebook
 	database.DB.Where("space_id = ?", spaceID).Find(&notebooks)
+	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
+}
+
+// ==========================================================
+// 📚 3. GET /spaces/:space_id/notebooks (Aba de Cadernos)
+// ==========================================================
+func ListSpaceNotebooks(c *gin.Context) {
+	spaceID := c.Param("space_id")
+
+	var notebooks []models.Notebook
+	database.DB.
+		Preload("Pages").
+		Preload("Guides.Pages").
+		Preload("Guides.SubGuides.Pages").
+		Where("space_id = ?", spaceID).
+		Find(&notebooks)
+
+	now := time.Now()
+	for i := range notebooks {
+		if notebooks[i].UnlockAt != nil && notebooks[i].UnlockAt.After(now) {
+			notebooks[i].IsLocked = true
+			notebooks[i].Pages = []models.Page{} // Esconde do aluno se tiver cadeado
+			notebooks[i].Guides = []models.Guide{}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
 }
