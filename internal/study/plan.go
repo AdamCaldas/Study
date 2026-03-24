@@ -16,7 +16,7 @@ import (
 )
 
 // ==========================================================
-// 📥 ESTRUTURAS DE ENTRADA (O novo Payload Unificado)
+// 📥 ESTRUTURAS DE ENTRADA (Compartilhadas com cycles.go)
 // ==========================================================
 
 type DisciplineInput struct {
@@ -38,10 +38,10 @@ type DailyScheduleInput struct {
 
 type GenerateStrategyInput struct {
 	Mode               string            `json:"mode" binding:"required"`
-	Source             string            `json:"source"` // "user" ou "institution"
+	Source             string            `json:"source"`
 	TargetGoal         string            `json:"target_goal"`
 	HoursPerDay        float64           `json:"hours_per_day"`
-	AvailabilityID     *uuid.UUID        `json:"availability_id" binding:"required"` // Puxa do Perfil Global
+	AvailabilityID     *uuid.UUID        `json:"availability_id" binding:"required"`
 	FreeTimePreference int               `json:"free_time_preference"`
 	MinSessionMin      int               `json:"min_session_minutes"`
 	MaxSessionMin      int               `json:"max_session_minutes"`
@@ -57,7 +57,7 @@ type CreateManualBlockInput struct {
 }
 
 // ==========================================================
-// 🧮 FUNÇÕES AUXILIARES (Matemática e Tempo)
+// 🧮 FUNÇÕES AUXILIARES
 // ==========================================================
 
 func timeToMinutes(t string) int {
@@ -75,7 +75,6 @@ func minutesToTime(m int) string {
 	return fmt.Sprintf("%02d:%02d", h, mins)
 }
 
-// Essa função agora só é usada para fatiar os bloquinhos do modo FIXED
 func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
 	var totalWeight float64 = 0
 	var calculatedBlocks []models.StudyBlock
@@ -118,7 +117,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 }
 
 // ==========================================================
-// 🚀 1. O MOTOR UNIFICADO (Gera Ciclo ou Cronograma)
+// 🚀 1. GERAR CRONOGRAMA (FIXED)
 // ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -138,7 +137,6 @@ func GenerateAutoPlan(c *gin.Context) {
 
 	tx := database.DB.Begin()
 
-	// 👉 1. A MÁGICA AQUI: Buscar a rotina global do usuário!
 	var availabilityProfile models.AvailabilityProfile
 	if err := tx.Where("id = ? AND user_id = ?", input.AvailabilityID, userID).First(&availabilityProfile).Error; err != nil {
 		tx.Rollback()
@@ -153,18 +151,15 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// 👉 2. Destruição e Recriação da Estratégia (Separado por MODE)
+	// Força o modo FIXED
 	var strategy models.StudyStrategy
-	// Ele procura se já existe uma estratégia DESSE MODO específico
-	if err := tx.Where("space_id = ? AND mode = ?", spaceID, input.Mode).First(&strategy).Error; err != nil {
-		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: input.Mode}
+	if err := tx.Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
+		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "fixed"}
 		tx.Create(&strategy)
 	}
 
-	// Apaga só os blocos da estratégia DESTE MODO que estamos gerando
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
-	// Cria os cadernos vazios
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
 			newNb := models.Notebook{
@@ -179,13 +174,7 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
-	// 👉 3. Atualizar a Estratégia
-	strategy.Mode = input.Mode
-	if input.Source != "" {
-		strategy.Source = input.Source
-	} else {
-		strategy.Source = "user"
-	}
+	strategy.Source = input.Source
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
 	strategy.FreeTimePreference = input.FreeTimePreference
@@ -196,133 +185,98 @@ func GenerateAutoPlan(c *gin.Context) {
 	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
 
-	// =================================================================
-	// 👉 4. LÓGICA DIVIDIDA: CICLO (Sem duplicar) vs CRONOGRAMA (Fatiado)
-	// =================================================================
-	if input.Mode == "adaptive" {
-		// MODO CICLO: Apenas 1 bloco por matéria. Sem duplicação na semana.
-		var totalWeight float64 = 0
-		for _, disc := range input.Disciplines {
-			totalWeight += float64(disc.Importance + (6 - disc.Performance))
+	// MODO FIXED: Fatiar e encaixar nos horários da semana
+	baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
+	subjectIndex := 0
+	sessionLength := input.MaxSessionMin
+	if sessionLength == 0 {
+		sessionLength = 50
+	}
+	breakLength := 10
+
+	for _, dayConfig := range dailyAvailability {
+		timeline := make([]bool, 1440*2)
+
+		wake := timeToMinutes(dayConfig.WakeUpTime)
+		sleep := timeToMinutes(dayConfig.SleepTime)
+		if sleep < wake {
+			sleep += 1440
 		}
+		workStart := timeToMinutes(dayConfig.WorkStart)
+		workEnd := timeToMinutes(dayConfig.WorkEnd)
+		lunchStart := timeToMinutes(dayConfig.LunchStart)
+		lunchEnd := timeToMinutes(dayConfig.LunchEnd)
 
-		sequence := 1
-		for _, disc := range input.Disciplines {
-			weight := float64(disc.Importance + (6 - disc.Performance))
-			proportion := weight / totalWeight
-			suggestedMin := int(math.Round(proportion * dailyMinutes))
-
-			// Respeita o mínimo, mas não fatiamos pelo máximo (é um bloco só!)
-			if input.MinSessionMin > 0 && suggestedMin < input.MinSessionMin {
-				suggestedMin = input.MinSessionMin
-			}
-
-			finalBlocks = append(finalBlocks, models.StudyBlock{
-				StrategyID:       strategy.ID,
-				NotebookID:       disc.NotebookID,
-				Activity:         disc.Name,
-				Importance:       disc.Importance,
-				Performance:      disc.Performance,
-				SuggestedMinutes: suggestedMin,
-				Sequence:         sequence,
-			})
-			sequence++
+		for i := 0; i < wake; i++ {
+			timeline[i] = true
 		}
-
-	} else {
-		// MODO FIXED: Fatiar e encaixar nos horários da semana
-		baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
-		subjectIndex := 0
-		sessionLength := input.MaxSessionMin
-		if sessionLength == 0 {
-			sessionLength = 50
+		for i := sleep; i < len(timeline); i++ {
+			timeline[i] = true
 		}
-		breakLength := 10
-
-		for _, dayConfig := range dailyAvailability {
-			timeline := make([]bool, 1440*2)
-
-			wake := timeToMinutes(dayConfig.WakeUpTime)
-			sleep := timeToMinutes(dayConfig.SleepTime)
-			if sleep < wake {
-				sleep += 1440
-			}
-			workStart := timeToMinutes(dayConfig.WorkStart)
-			workEnd := timeToMinutes(dayConfig.WorkEnd)
-			lunchStart := timeToMinutes(dayConfig.LunchStart)
-			lunchEnd := timeToMinutes(dayConfig.LunchEnd)
-
-			for i := 0; i < wake; i++ {
+		if workStart > 0 && workEnd > workStart {
+			for i := workStart; i < workEnd; i++ {
 				timeline[i] = true
 			}
-			for i := sleep; i < len(timeline); i++ {
+		}
+		if lunchStart > 0 && lunchEnd > lunchStart {
+			for i := lunchStart; i < lunchEnd; i++ {
 				timeline[i] = true
 			}
-			if workStart > 0 && workEnd > workStart {
-				for i := workStart; i < workEnd; i++ {
-					timeline[i] = true
-				}
+		}
+
+		var freeBlocks [][]int
+		startFree := -1
+		for i := wake; i < sleep; i++ {
+			if !timeline[i] && startFree == -1 {
+				startFree = i
+			} else if timeline[i] && startFree != -1 {
+				freeBlocks = append(freeBlocks, []int{startFree, i})
+				startFree = -1
 			}
-			if lunchStart > 0 && lunchEnd > lunchStart {
-				for i := lunchStart; i < lunchEnd; i++ {
-					timeline[i] = true
-				}
+		}
+		if startFree != -1 {
+			freeBlocks = append(freeBlocks, []int{startFree, sleep})
+		}
+
+		lazerRestante := input.FreeTimePreference
+		if lazerRestante > 0 && len(freeBlocks) > 0 {
+			lastBlockIndex := len(freeBlocks) - 1
+			blockDuration := freeBlocks[lastBlockIndex][1] - freeBlocks[lastBlockIndex][0]
+
+			if blockDuration > lazerRestante {
+				freeBlocks[lastBlockIndex][1] -= lazerRestante
+			} else {
+				freeBlocks = freeBlocks[:lastBlockIndex]
 			}
+		}
 
-			var freeBlocks [][]int
-			startFree := -1
-			for i := wake; i < sleep; i++ {
-				if !timeline[i] && startFree == -1 {
-					startFree = i
-				} else if timeline[i] && startFree != -1 {
-					freeBlocks = append(freeBlocks, []int{startFree, i})
-					startFree = -1
+		for _, fb := range freeBlocks {
+			curr := fb[0]
+			limit := fb[1]
+
+			for curr+sessionLength <= limit {
+				if len(baseBlocks) == 0 {
+					break
 				}
-			}
-			if startFree != -1 {
-				freeBlocks = append(freeBlocks, []int{startFree, sleep})
-			}
+				baseBlock := baseBlocks[subjectIndex%len(baseBlocks)]
 
-			lazerRestante := input.FreeTimePreference
-			if lazerRestante > 0 && len(freeBlocks) > 0 {
-				lastBlockIndex := len(freeBlocks) - 1
-				blockDuration := freeBlocks[lastBlockIndex][1] - freeBlocks[lastBlockIndex][0]
+				dayCopy := dayConfig.DayOfWeek
+				startCopy := minutesToTime(curr)
+				endCopy := minutesToTime(curr + sessionLength)
 
-				if blockDuration > lazerRestante {
-					freeBlocks[lastBlockIndex][1] -= lazerRestante
-				} else {
-					freeBlocks = freeBlocks[:lastBlockIndex]
+				newBlock := models.StudyBlock{
+					StrategyID:       strategy.ID,
+					NotebookID:       baseBlock.NotebookID,
+					Activity:         baseBlock.Activity,
+					DayOfWeek:        &dayCopy,
+					StartTime:        &startCopy,
+					EndTime:          &endCopy,
+					SuggestedMinutes: sessionLength,
 				}
-			}
+				finalBlocks = append(finalBlocks, newBlock)
 
-			for _, fb := range freeBlocks {
-				curr := fb[0]
-				limit := fb[1]
-
-				for curr+sessionLength <= limit {
-					if len(baseBlocks) == 0 {
-						break
-					}
-					baseBlock := baseBlocks[subjectIndex%len(baseBlocks)]
-
-					dayCopy := dayConfig.DayOfWeek
-					startCopy := minutesToTime(curr)
-					endCopy := minutesToTime(curr + sessionLength)
-
-					newBlock := models.StudyBlock{
-						StrategyID:       strategy.ID,
-						NotebookID:       baseBlock.NotebookID,
-						Activity:         baseBlock.Activity,
-						DayOfWeek:        &dayCopy,
-						StartTime:        &startCopy,
-						EndTime:          &endCopy,
-						SuggestedMinutes: sessionLength,
-					}
-					finalBlocks = append(finalBlocks, newBlock)
-
-					subjectIndex++
-					curr += sessionLength + breakLength
-				}
+				subjectIndex++
+				curr += sessionLength + breakLength
 			}
 		}
 	}
@@ -333,39 +287,36 @@ func GenerateAutoPlan(c *gin.Context) {
 	tx.Commit()
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Estratégia configurada com sucesso!",
+		"message":  "Cronograma configurado com sucesso!",
 		"strategy": strategy,
 		"blocks":   finalBlocks,
 	})
 }
 
 // ==========================================================
-// 📋 2. LISTAR ESTRATÉGIA E BLOCOS (Trazendo TODAS do Space)
+// 📋 2. LISTAR CRONOGRAMA (Apenas FIXED)
 // ==========================================================
 func ListPlans(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Agora é um ARRAY (Fatia) para caber as duas!
-	var strategies []models.StudyStrategy
-
-	// A mágica: Puxamos TODAS as estratégias do Space e os blocos de cada uma
+	var strategy models.StudyStrategy
 	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day_of_week ASC, start_time ASC, sequence ASC")
-	}).Where("space_id = ?", spaceID).Find(&strategies).Error; err != nil {
+		return db.Order("day_of_week ASC, start_time ASC")
+	}).Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
 		c.JSON(200, gin.H{
-			"message":          "Nenhuma estratégia configurada ainda",
-			"study_strategies": []models.StudyStrategy{}, // ARRAY VAZIO
+			"message":        "Nenhum cronograma configurado ainda",
+			"study_strategy": nil,
 		})
 		return
 	}
 
 	c.JSON(200, gin.H{
-		"study_strategies": strategies, // A CHAVE AGORA É UM ARRAY COM O FIXED E ADAPTIVE!
+		"study_strategy": strategy,
 	})
 }
 
 // ==========================================================
-// ✏️ 3. CRUD MANUAL DOS BLOCOS
+// ✏️ 3. CRUD MANUAL DOS BLOCOS DO CRONOGRAMA
 // ==========================================================
 func CreateStudyPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -376,9 +327,9 @@ func CreateStudyPlan(c *gin.Context) {
 	}
 
 	var strategy models.StudyStrategy
-	database.DB.Where("space_id = ?", spaceIDStr).First(&strategy)
+	database.DB.Where("space_id = ? AND mode = 'fixed'", spaceIDStr).First(&strategy)
 	if strategy.ID == uuid.Nil {
-		c.JSON(400, gin.H{"error": "Você precisa gerar uma estratégia base primeiro."})
+		c.JSON(400, gin.H{"error": "Você precisa gerar um cronograma base primeiro."})
 		return
 	}
 
@@ -403,7 +354,7 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 	c.ShouldBindJSON(&input)
 
 	var strategy models.StudyStrategy
-	database.DB.Where("space_id = ?", spaceIDStr).First(&strategy)
+	database.DB.Where("space_id = ? AND mode = 'fixed'", spaceIDStr).First(&strategy)
 
 	var blocks []models.StudyBlock
 	for _, p := range input.Plans {
@@ -442,67 +393,7 @@ func DeleteStudyPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔄 4. AVANÇAR PASSO E REGISTRAR TEMPO REAL (Para Relatórios)
-// ==========================================================
-func AdvanceStrategyStep(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	userID, _ := c.Get("userID")
-
-	// Estrutura para receber os dados do cronômetro do Front-end
-	var input struct {
-		ActualDuration int    `json:"actual_duration"` // Tempo real que o aluno ficou (ex: 180 min)
-		ActivityName   string `json:"activity_name"`   // Nome da matéria (ex: Matemática)
-		PlannedMinutes int    `json:"planned_minutes"` // O tempo que o sistema tinha sugerido (ex: 60 min)
-	}
-
-	// Se o Front não mandar o tempo, a gente dá erro para não perder o relatório
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "O Front-end precisa enviar o tempo real estudado."})
-		return
-	}
-
-	tx := database.DB.Begin()
-
-	// 1. Criamos o registro do "Ponto" (Sessão de Estudo)
-	session := models.StudySession{
-		UserID:         userID.(uuid.UUID),
-		SpaceID:        uuid.MustParse(spaceID),
-		ActivityName:   input.ActivityName,
-		PlannedMinutes: input.PlannedMinutes,
-		ActualMinutes:  input.ActualDuration, // Salvando as horas reais!
-	}
-
-	if err := tx.Create(&session).Error; err != nil {
-		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao salvar o histórico de tempo."})
-		return
-	}
-
-	// 2. Avançamos o card do ciclo (Lógica original mantida)
-	var strategy models.StudyStrategy
-	if err := tx.Preload("Blocks").Where("space_id = ?", spaceID).First(&strategy).Error; err != nil {
-		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Estratégia não encontrada"})
-		return
-	}
-
-	totalItems := len(strategy.Blocks)
-	if totalItems > 0 {
-		strategy.CurrentStep = (strategy.CurrentStep + 1) % totalItems
-		tx.Save(&strategy)
-	}
-
-	tx.Commit()
-
-	c.JSON(200, gin.H{
-		"message":        "Tempo registrado e próximo card liberado!",
-		"actual_minutes": input.ActualDuration,
-		"next_step":      strategy.CurrentStep,
-	})
-}
-
-// ==========================================================
-// 📊 GET ANALYTICS: Relatório de Desempenho do Aluno
+// 📊 GET ANALYTICS (Geral para Ambos os Modos)
 // ==========================================================
 func GetMyStudyAnalytics(c *gin.Context) {
 	userIDInterface, _ := c.Get("userID")
@@ -518,7 +409,6 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		return
 	}
 
-	// 1. Buscamos todas as sessões do aluno nos últimos 30 dias
 	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
 	var sessions []models.StudySession
 
@@ -527,16 +417,13 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		return
 	}
 
-	// 2. Variáveis para somar os totais
 	var todayMinutes, weekMinutes, extraMinutes int
 	subjectTotals := make(map[string]int)
 
-	// Lógica para descobrir o início de "Hoje" e o início da "Semana"
 	now := time.Now()
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	startOfWeek := startOfDay.AddDate(0, 0, -int(now.Weekday())) // Volta até o Domingo
+	startOfWeek := startOfDay.AddDate(0, 0, -int(now.Weekday()))
 
-	// 3. A Matemática (Iterando sobre as sessões salvas)
 	for _, s := range sessions {
 		subjectTotals[s.ActivityName] += s.ActualMinutes
 
@@ -552,7 +439,6 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		}
 	}
 
-	// 4. Formata o mapa de matérias num array de JSON para o Front-end ler fácil
 	type SubjectStat struct {
 		Name    string `json:"name"`
 		Minutes int    `json:"minutes"`
@@ -562,7 +448,6 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		distribution = append(distribution, SubjectStat{Name: name, Minutes: mins})
 	}
 
-	// 5. O Payload Perfeito
 	c.JSON(http.StatusOK, gin.H{
 		"overview": gin.H{
 			"today_minutes": todayMinutes,

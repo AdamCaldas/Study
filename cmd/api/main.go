@@ -147,15 +147,24 @@ func main() {
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
 			// =======================================================
-			// 👉 NOVO MOTOR DE ESTUDOS UNIFICADO (Strategy e Blocks)
+			// 👉 MOTOR DO CRONOGRAMA (FIXED)
 			// =======================================================
-			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan) // 🤖 O Super Gerador (Fixed ou Adaptive)
-			spaceRoutes.GET("/plans", study.ListPlans)                       // 📋 Listar a Estratégia e seus Blocos
-			spaceRoutes.POST("/plans", study.CreateStudyPlan)                // ➕ Criar um bloco manual
-			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans) // 📦 Criar vários blocos
-			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)        // ✏️ Editar bloco
-			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)     // 🗑️ Apagar bloco
-			spaceRoutes.PATCH("/plans/advance", study.AdvanceStrategyStep)   // 🔄 Girar a roleta (Modo Adaptive)
+			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
+			spaceRoutes.GET("/plans", study.ListPlans)
+			spaceRoutes.POST("/plans", study.CreateStudyPlan)
+			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans)
+			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
+			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
+
+			// =======================================================
+			// 👉 MOTOR DO CICLO (ADAPTIVE - A Roleta)
+			// =======================================================
+			spaceRoutes.POST("/cycles/auto-generate", study.GenerateAutoCycle)
+			spaceRoutes.GET("/cycles", study.ListCycles)
+			spaceRoutes.PATCH("/cycles/advance", study.AdvanceCycleStep)
+			spaceRoutes.POST("/cycles/blocks", study.CreateCycleBlock)
+			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
+			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)
 
 			// 👉 Avaliações e Anti-Cola
 			spaceRoutes.POST("/reviews", study.CreateReview)
