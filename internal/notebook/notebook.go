@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ==========================================================
@@ -171,25 +172,54 @@ func ListNotebooks(c *gin.Context) {
 // ==========================================================
 // 📚 3. GET /spaces/:space_id/notebooks (Aba de Cadernos)
 // ==========================================================
+// ==========================================================
+// 📚 3. GET /spaces/:space_id/notebooks (SÓ AS CAPAS DOS CADERNOS)
+// ==========================================================
 func ListSpaceNotebooks(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
 	var notebooks []models.Notebook
-	database.DB.
-		Preload("Pages").
-		Preload("Guides.Pages").
-		Preload("Guides.SubGuides.Pages").
-		Where("space_id = ?", spaceID).
-		Find(&notebooks)
+	// 🚨 Tiramos os Preloads pesados daqui! O BD só vai buscar as capas (metadata).
+	database.DB.Where("space_id = ?", spaceID).Find(&notebooks)
 
 	now := time.Now()
 	for i := range notebooks {
 		if notebooks[i].UnlockAt != nil && notebooks[i].UnlockAt.After(now) {
 			notebooks[i].IsLocked = true
-			notebooks[i].Pages = []models.Page{} // Esconde do aluno se tiver cadeado
-			notebooks[i].Guides = []models.Guide{}
 		}
+		// Não precisamos mais esvaziar as páginas aqui, porque elas nem foram buscadas!
 	}
 
 	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})
+}
+
+// ==========================================================
+// 📖 4. GET /notebooks/:notebook_id (O RECHEIO DO CADERNO)
+// ==========================================================
+func GetNotebookFull(c *gin.Context) {
+	notebookID := c.Param("notebook_id")
+
+	var notebook models.Notebook
+	// Aqui sim a gente usa o Preload para trazer as Pastas (Guides) e as Páginas!
+	if err := database.DB.
+		Preload("Pages", func(db *gorm.DB) *gorm.DB {
+			return db.Order("\"order\" asc") // Já traz ordenado bonitinho!
+		}).
+		Preload("Guides.Pages", func(db *gorm.DB) *gorm.DB {
+			return db.Order("\"order\" asc")
+		}).
+		Preload("Guides.SubGuides.Pages"). // Se tiver sub-pastas
+		Where("id = ?", notebookID).
+		First(&notebook).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
+		return
+	}
+
+	// Trava de segurança extra (Cadeado temporal)
+	if notebook.UnlockAt != nil && notebook.UnlockAt.After(time.Now()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este caderno ainda está trancado pelo professor."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"notebook": notebook})
 }

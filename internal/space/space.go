@@ -898,10 +898,20 @@ func ExportClassDiaryCSV(c *gin.Context) {
 }
 
 // ==========================================================
-// 🏠 1. GET /spaces/:space_id (O Novo Dashboard Leve)
+// 🏠 1. GET /spaces/:space_id (O Novo Dashboard Leve - CORRIGIDO)
 // ==========================================================
 func GetSpaceDetails(c *gin.Context) {
 	spaceID := c.Param("space_id")
+
+	// Pega o ID de quem está acessando o app agora
+	userIDInterface, _ := c.Get("userID")
+	var loggedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		loggedUserID = v
+	case string:
+		loggedUserID, _ = uuid.Parse(v)
+	}
 
 	var space models.Space
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
@@ -923,10 +933,45 @@ func GetSpaceDetails(c *gin.Context) {
 		collaborators = []map[string]interface{}{}
 	}
 
+	// 👇 A MÁGICA PRA ACALMAR O MAYAN: Pegar as permissões de quem tá logado!
+	var myPermissions map[string]interface{}
+
+	if space.OwnerID == loggedUserID {
+		// Se o cara logado for o Dono da Turma, manda tudo TRUE pra liberar os botões no Front
+		myPermissions = map[string]interface{}{
+			"access_level":         "OWNER",
+			"can_edit_space_info":  true,
+			"can_edit_space_color": true,
+			"can_create_content":   true,
+			"can_edit_content":     true,
+			"can_delete_content":   true,
+			"can_manage_members":   true,
+			"can_send_invites":     true,
+			"can_manage_plans":     true,
+		}
+	} else {
+		// Se for um colaborador/aluno, busca no banco o que ele pode fazer
+		var perm models.SpacePermission
+		database.DB.Where("space_id = ? AND user_id = ?", spaceID, loggedUserID).First(&perm)
+
+		myPermissions = map[string]interface{}{
+			"access_level":         perm.AccessLevel,
+			"can_edit_space_info":  perm.CanEditSpaceInfo,
+			"can_edit_space_color": perm.CanEditSpaceColor,
+			"can_create_content":   perm.CanCreateContent,
+			"can_edit_content":     perm.CanEditContent,
+			"can_delete_content":   perm.CanDeleteContent,
+			"can_manage_members":   perm.CanManageMembers,
+			"can_send_invites":     perm.CanSendInvites,
+			"can_manage_plans":     perm.CanManagePlans,
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"space":         space,
-		"owner":         owner,
-		"collaborators": collaborators,
+		"space":          space, // O share_code está aqui dentro!
+		"owner":          owner,
+		"collaborators":  collaborators,
+		"my_permissions": myPermissions, // 👈 Mayan usa isso pra mostrar/esconder botões!
 	})
 }
 

@@ -106,6 +106,7 @@ func main() {
 		protected.POST("/attendance/check-in", space.RegisterAttendance)
 
 		// 👉 Organização Externa de Cadernos (Pastas e Guias)
+		protected.GET("/notebooks/:notebook_id", notebook.GetNotebookFull)
 		protected.POST("/notebooks/:notebook_id/guides", notebook.CreateGuide)
 		protected.PUT("/guides/:guide_id", notebook.UpdateGuide)
 		protected.DELETE("/guides/:guide_id", notebook.DeleteGuide)
@@ -123,10 +124,10 @@ func main() {
 			// =======================================================
 			// ⚡ O NOVO PADRÃO "LAZY LOADING" (Mini-Rotas)
 			// =======================================================
-			spaceRoutes.GET("", space.GetSpaceDetails)                 // 🏠 Home da Turma (Ex-Dashboard)
-			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks) // 📚 Aba de Cadernos
-			spaceRoutes.GET("/notes", space.ListSpaceNotes)            // 📝 Aba de Post-its
-			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)        // 📝 Aba de Provas
+			spaceRoutes.GET("", space.GetSpaceDetails)
+			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks)
+			spaceRoutes.GET("/notes", space.ListSpaceNotes)
+			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)
 
 			// 👉 Setup e Moderação da Turma
 			spaceRoutes.PUT("", space.UpdateSpace)
