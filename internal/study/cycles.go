@@ -43,17 +43,43 @@ func GenerateAutoCycle(c *gin.Context) {
 	// Limpa o ciclo velho desse Space
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
-	// Cria cadernos vazios se não existirem
+	// ==========================================================
+	// 🛠️ MÁGICA ANTI-DUPLICAÇÃO E CRIAÇÃO DE PÁGINA
+	// ==========================================================
+	notebooksCriados := make(map[string]uuid.UUID)
+
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
+
+			// 1. CHECAGEM ANTI-DUPLICATA
+			if idSalvo, jaCriou := notebooksCriados[disc.Name]; jaCriou {
+				input.Disciplines[i].NotebookID = &idSalvo
+				continue
+			}
+
+			// 2. Cria APENAS 1 Caderno
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,
-				ColorHex:    "#3B82F6",
+				ColorHex:    "#3B82F6", // Azul padrão
 				CreatedByID: userID.(uuid.UUID),
 				UpdatedByID: userID.(uuid.UUID),
 			}
 			tx.Create(&newNb)
+
+			// 3. Cria a primeira Página automaticamente
+			newPage := models.Page{
+				NotebookID:  newNb.ID,
+				Title:       "Anotações - " + disc.Name,
+				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				Order:       0,
+				CreatedByID: userID.(uuid.UUID),
+				UpdatedByID: userID.(uuid.UUID),
+			}
+			tx.Create(&newPage)
+
+			// 4. Salva no mapa e vincula o ID
+			notebooksCriados[disc.Name] = newNb.ID
 			input.Disciplines[i].NotebookID = &newNb.ID
 		}
 	}
