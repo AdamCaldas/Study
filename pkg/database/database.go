@@ -51,6 +51,10 @@ func ConnectDB() {
 	log.Println("Limpando tabelas antigas de ciclo e plano...")
 	db.Migrator().DropTable("study_cycles", "study_cycle_items", "study_plans")
 
+	// 👇 COLOQUE A BOMBA AQUI 👇
+	log.Println("Destruindo o cadeado do banco para permitir Ciclo + Plano juntos...")
+	db.Exec("DROP INDEX IF EXISTS idx_study_strategies_space_id;")
+
 	// --- MIGRATIONS ---
 	log.Println("Rodando as Migrations do banco de dados...")
 	err = db.AutoMigrate(

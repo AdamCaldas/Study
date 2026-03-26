@@ -13,7 +13,7 @@ import (
 )
 
 // ==========================================================
-// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta) - BLINDADO E COM LOGS REAIS
+// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta) - DEFINITIVO
 // ==========================================================
 func GenerateAutoCycle(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -36,7 +36,6 @@ func GenerateAutoCycle(c *gin.Context) {
 	}
 
 	var input GenerateStrategyInput
-	// 👇 Se falhar o JSON, cospe o erro exato pro Mayan ler!
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(400, gin.H{"error": "Dados inválidos: " + err.Error()})
 		return
@@ -45,8 +44,8 @@ func GenerateAutoCycle(c *gin.Context) {
 	tx := database.DB.Begin()
 
 	var strategy models.StudyStrategy
+	// 👇 Busca APENAS o ciclo adaptativo dessa turma
 	if err := tx.Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
-		// 👇 MÁGICA AQUI: Preenchemos tudo ANTES de dar Create pro banco não dar erro de "Not Null"
 		strategy = models.StudyStrategy{
 			SpaceID:       spaceID,
 			Mode:          "adaptive",
@@ -57,12 +56,12 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
-			// 👇 MÁGICA 2: Se o banco estourar, mostra a coluna exata que deu pau!
 			c.JSON(500, gin.H{"error": "Erro do Banco ao criar estratégia: " + err.Error()})
 			return
 		}
 	}
 
+	// Limpa apenas os blocos desse ciclo específico
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
 	notebooksCriados := make(map[string]uuid.UUID)
@@ -88,6 +87,7 @@ func GenerateAutoCycle(c *gin.Context) {
 				return
 			}
 
+			// 👇 MÁGICA DO BYPASS DE TAGS (Raw Map)
 			newPageID := uuid.New()
 			err := tx.Table("pages").Create(map[string]interface{}{
 				"id":            newPageID,
@@ -111,7 +111,7 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 	}
 
-	// Como já preenchemos na criação, aqui a gente só garante que se for edição, ele atualiza
+	// Atualiza os dados se a estratégia já existia
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
 	strategy.MinSessionMin = input.MinSessionMin

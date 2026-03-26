@@ -197,7 +197,7 @@ type PageNote struct {
 // STUDY STRATEGY (O Cérebro do Space)
 type StudyStrategy struct {
 	ID                 uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID            uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"space_id"` // 1 Space = 1 Estratégia
+	SpaceID            uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	Mode               string    `gorm:"size:50;not null;default:'adaptive'" json:"mode"`
 	Source             string    `gorm:"size:50;not null;default:'user'" json:"source"` // NOVO: Trava Institucional
 	TargetGoal         string    `gorm:"size:255" json:"target_goal"`

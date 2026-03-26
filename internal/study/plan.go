@@ -117,7 +117,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 }
 
 // ==========================================================
-// 🚀 1. GERAR CRONOGRAMA (FIXED) - BYPASS DE TAGS E VALIDAÇÃO MANUAL
+// 🚀 1. GERAR CRONOGRAMA (FIXED) - DEFINITIVO
 // ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -145,7 +145,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// 👇 Validação manual: Se for plano fixo, TEM que ter a rotina
 	if input.AvailabilityID == nil {
 		c.JSON(400, gin.H{"error": "Para gerar um Cronograma Fixo, você precisa enviar o availability_id."})
 		return
@@ -168,15 +167,17 @@ func GenerateAutoPlan(c *gin.Context) {
 	}
 
 	var strategy models.StudyStrategy
+	// 👇 Busca APENAS o cronograma fixo dessa turma
 	if err := tx.Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "fixed"}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco."})
+			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco: " + err.Error()})
 			return
 		}
 	}
 
+	// Limpa apenas os blocos desse cronograma específico
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
 	notebooksCriados := make(map[string]uuid.UUID)
@@ -201,7 +202,7 @@ func GenerateAutoPlan(c *gin.Context) {
 				return
 			}
 
-			// 👇 MÁGICA AQUI: Inserção direta no banco ignorando o GORM. Mata o Erro das Tags 100%.
+			// 👇 MÁGICA DO BYPASS DE TAGS (Raw Map)
 			newPageID := uuid.New()
 			err := tx.Table("pages").Create(map[string]interface{}{
 				"id":            newPageID,
