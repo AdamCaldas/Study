@@ -13,7 +13,7 @@ import (
 )
 
 // ==========================================================
-// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta) - BYPASS DE TAGS
+// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta) - BLINDADO E COM LOGS REAIS
 // ==========================================================
 func GenerateAutoCycle(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -36,8 +36,9 @@ func GenerateAutoCycle(c *gin.Context) {
 	}
 
 	var input GenerateStrategyInput
+	// 👇 Se falhar o JSON, cospe o erro exato pro Mayan ler!
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos enviados pelo front-end."})
+		c.JSON(400, gin.H{"error": "Dados inválidos: " + err.Error()})
 		return
 	}
 
@@ -45,10 +46,19 @@ func GenerateAutoCycle(c *gin.Context) {
 
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
-		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "adaptive"}
+		// 👇 MÁGICA AQUI: Preenchemos tudo ANTES de dar Create pro banco não dar erro de "Not Null"
+		strategy = models.StudyStrategy{
+			SpaceID:       spaceID,
+			Mode:          "adaptive",
+			TargetGoal:    input.TargetGoal,
+			HoursPerDay:   input.HoursPerDay,
+			MinSessionMin: input.MinSessionMin,
+			CurrentStep:   0,
+		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco."})
+			// 👇 MÁGICA 2: Se o banco estourar, mostra a coluna exata que deu pau!
+			c.JSON(500, gin.H{"error": "Erro do Banco ao criar estratégia: " + err.Error()})
 			return
 		}
 	}
@@ -78,7 +88,6 @@ func GenerateAutoCycle(c *gin.Context) {
 				return
 			}
 
-			// 👇 MÁGICA DO BYPASS NO CICLO TAMBÉM
 			newPageID := uuid.New()
 			err := tx.Table("pages").Create(map[string]interface{}{
 				"id":            newPageID,
@@ -102,13 +111,14 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 	}
 
+	// Como já preenchemos na criação, aqui a gente só garante que se for edição, ele atualiza
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
 	strategy.MinSessionMin = input.MinSessionMin
 	strategy.CurrentStep = 0
 	if err := tx.Save(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao salvar parâmetros da estratégia."})
+		c.JSON(500, gin.H{"error": "Erro ao atualizar parâmetros: " + err.Error()})
 		return
 	}
 
