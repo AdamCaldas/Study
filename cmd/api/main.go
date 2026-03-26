@@ -76,6 +76,9 @@ func main() {
 		protected.POST("/me/availability", users.SaveAvailabilityProfile)
 		protected.GET("/me/analytics", study.GetMyStudyAnalytics)
 
+		// 👉 Rotas de Configuração do Usuário
+		protected.PUT("/availability/:availability_id", study.UpdateAvailabilityProfile)
+
 		// 👉 Repositório Global do Professor
 		protected.GET("/me/question-bank", study.GetMyQuestionBank)
 		protected.POST("/me/question-bank", study.SaveToQuestionBank)
@@ -234,6 +237,7 @@ func main() {
 		godMode.DELETE("/help-center/categories/:category_id", admin.DeleteHelpCategory)
 		godMode.POST("/help-center/articles", admin.CreateHelpArticle)
 		godMode.DELETE("/help-center/articles/:article_id", admin.DeleteHelpArticle)
+		godMode.POST("/users/batch-delete", admin.MassDeleteUsers)
 	}
 
 	port := os.Getenv("PORT")

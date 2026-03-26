@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -153,5 +154,61 @@ func DeleteAnyUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Usuário ANIQUILADO com sucesso! Foi de base, virou saudade e não sobrou nem poeira no banco de dados. 💀💥🧹",
+	})
+}
+
+// Estrutura para receber o array de IDs dos condenados
+type MassDeleteInput struct {
+	UserIDs []string `json:"user_ids" binding:"required,min=1"`
+}
+
+// ==========================================================
+// 💥 O ESTALAR DE DEDOS DO THANOS: Aniquilação em Massa
+// ==========================================================
+func MassDeleteUsers(c *gin.Context) {
+	var input MassDeleteInput
+
+	// Recebe o array de IDs do Front-end
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Lista de alvos inválida. Mande um array 'user_ids' com pelo menos um ID."})
+		return
+	}
+
+	// Inicia a transação (Ou apaga o bonde todo, ou não apaga ninguém)
+	tx := database.DB.Begin()
+
+	// 1. Remove a galera de todos os Spaces onde eram apenas convidados
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.SpacePermission{})
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.SpaceJoinRequest{})
+
+	// 2. Apaga TODOS os Spaces onde eles eram os DONOS (O Cascata vai levar cadernos, páginas, etc)
+	tx.Unscoped().Where("owner_id IN ?", input.UserIDs).Delete(&models.Space{})
+
+	// 3. Apaga os rastros soltos da galera (Pomodoros, Logs de Humor, Atividades e Pagamentos)
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.PomodoroSession{})
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.MoodCheckIn{})
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.ActivityLog{})
+	tx.Unscoped().Where("user_id IN ?", input.UserIDs).Delete(&models.PaymentHistory{})
+
+	// 4. O GOLPE FINAL: Deleta os Usuários do banco de dados real
+	result := tx.Unscoped().Where("id IN ?", input.UserIDs).Delete(&models.User{})
+
+	if result.Error != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "A Manopla do Infinito falhou: " + result.Error.Error()})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Nenhum alvo encontrado! Talvez eles já tenham ido de arrasta pra cima."})
+		return
+	}
+
+	// Confirma a aniquilação!
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("ANIQUILAÇÃO EM MASSA CONCLUÍDA! %d usuários foram de arrasta pra cima. O Thanos estalou os dedos e limpou o servidor! 💀💥🌩️", result.RowsAffected),
 	})
 }

@@ -117,7 +117,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 }
 
 // ==========================================================
-// 🚀 1. GERAR CRONOGRAMA (FIXED)
+// 🚀 1. GERAR CRONOGRAMA (FIXED) - BLINDADO COM TRATAMENTO DE ERROS
 // ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -127,7 +127,18 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("userID")
+	// 🛡️ PARSER SEGURO DO USER_ID (Evita falhas silenciosas de tipagem)
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	default:
+		c.JSON(401, gin.H{"error": "Usuário não autenticado corretamente."})
+		return
+	}
 
 	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -138,7 +149,7 @@ func GenerateAutoPlan(c *gin.Context) {
 	tx := database.DB.Begin()
 
 	var availabilityProfile models.AvailabilityProfile
-	if err := tx.Where("id = ? AND user_id = ?", input.AvailabilityID, userID).First(&availabilityProfile).Error; err != nil {
+	if err := tx.Where("id = ? AND user_id = ?", input.AvailabilityID, parsedUserID).First(&availabilityProfile).Error; err != nil {
 		tx.Rollback()
 		c.JSON(404, gin.H{"error": "Perfil de disponibilidade não encontrado."})
 		return
@@ -155,7 +166,11 @@ func GenerateAutoPlan(c *gin.Context) {
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "fixed"}
-		tx.Create(&strategy)
+		if err := tx.Create(&strategy).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco."})
+			return
+		}
 	}
 
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
@@ -168,36 +183,42 @@ func GenerateAutoPlan(c *gin.Context) {
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
 
-			// 1. CHECAGEM ANTI-DUPLICATA
 			if idSalvo, jaCriou := notebooksCriados[disc.Name]; jaCriou {
 				input.Disciplines[i].NotebookID = &idSalvo
 				continue
 			}
 
-			// 2. Cria APENAS 1 Caderno
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,
 				ColorHex:    "#8B5CF6",
-				CreatedByID: userID.(uuid.UUID),
-				UpdatedByID: userID.(uuid.UUID),
+				CreatedByID: parsedUserID,
+				UpdatedByID: parsedUserID,
 			}
-			tx.Create(&newNb)
+			// 👇 Agora ele caça o erro e te avisa!
+			if err := tx.Create(&newNb).Error; err != nil {
+				tx.Rollback()
+				c.JSON(500, gin.H{"error": "Erro ao criar caderno de " + disc.Name + ": " + err.Error()})
+				return
+			}
 
-			// 3. Cria a primeira Página automaticamente
 			newPage := models.Page{
 				NotebookID:  newNb.ID,
 				Title:       "Anotações - " + disc.Name,
 				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
 				Order:       0,
-				CreatedByID: userID.(uuid.UUID),
-				UpdatedByID: userID.(uuid.UUID),
+				CreatedByID: parsedUserID,
+				UpdatedByID: parsedUserID,
 			}
-			tx.Create(&newPage)
+			if err := tx.Create(&newPage).Error; err != nil {
+				tx.Rollback()
+				c.JSON(500, gin.H{"error": "Erro ao criar página de " + disc.Name + ": " + err.Error()})
+				return
+			}
 
-			// 4. Salva no mapa e vincula o ID
-			notebooksCriados[disc.Name] = newNb.ID
-			input.Disciplines[i].NotebookID = &newNb.ID
+			nbID := newNb.ID
+			notebooksCriados[disc.Name] = nbID
+			input.Disciplines[i].NotebookID = &nbID
 		}
 	}
 
@@ -207,7 +228,12 @@ func GenerateAutoPlan(c *gin.Context) {
 	strategy.FreeTimePreference = input.FreeTimePreference
 	strategy.MinSessionMin = input.MinSessionMin
 	strategy.MaxSessionMin = input.MaxSessionMin
-	tx.Save(&strategy)
+
+	if err := tx.Save(&strategy).Error; err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao salvar parâmetros da estratégia."})
+		return
+	}
 
 	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
@@ -308,10 +334,23 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
+	// 👇 TRAVA FINAL: Se o aluno não tiver tempo livre na semana, ou se der erro no banco, bloqueia!
 	if len(finalBlocks) > 0 {
-		tx.Create(&finalBlocks)
+		if err := tx.Create(&finalBlocks).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao salvar os blocos no banco: " + err.Error()})
+			return
+		}
+	} else {
+		tx.Rollback()
+		c.JSON(400, gin.H{"error": "Não foi possível gerar blocos. Verifique se você tem tempo livre suficiente na sua rotina diária."})
+		return
 	}
-	tx.Commit()
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro fatal ao confirmar transação: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Cronograma configurado com sucesso!",
@@ -483,4 +522,45 @@ func GetMyStudyAnalytics(c *gin.Context) {
 		},
 		"subject_distribution": distribution,
 	})
+}
+
+// ==========================================================
+// ⏰ ATUALIZAR ROTINA DO ALUNO (Disponibilidade de Horário)
+// ==========================================================
+func UpdateAvailabilityProfile(c *gin.Context) {
+	profileID := c.Param("availability_id")
+
+	// Pega o ID de quem está logado pra garantir segurança
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
+	// Espera receber aquele mesmo array de dias da semana (Schedule)
+	var input struct {
+		Schedule []DailyScheduleInput `json:"schedule" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de rotina inválido."})
+		return
+	}
+
+	// Converte o array de volta pra string JSON pra salvar no banco
+	scheduleJSON, _ := json.Marshal(input.Schedule)
+
+	// Atualiza o perfil no banco de dados
+	if err := database.DB.Model(&models.AvailabilityProfile{}).
+		Where("id = ? AND user_id = ?", profileID, parsedUserID).
+		Update("schedule", string(scheduleJSON)).Error; err != nil {
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a rotina."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Sua rotina foi atualizada com sucesso! Você já pode gerar um novo cronograma."})
 }
