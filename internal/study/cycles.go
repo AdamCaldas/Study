@@ -3,6 +3,7 @@ package study
 import (
 	"math"
 	"net/http"
+	"time"
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -97,6 +98,8 @@ func GenerateAutoCycle(c *gin.Context) {
 				"order":         0,
 				"created_by_id": parsedUserID,
 				"updated_by_id": parsedUserID,
+				"created_at":    time.Now(), // 👈 ADICIONE ISSO
+				"updated_at":    time.Now(), // 👈 ADICIONE ISSO
 			}).Error
 
 			if err != nil {
@@ -195,7 +198,7 @@ func ListCycles(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔄 3. AVANÇAR A ROLETA (Timer / Advance)
+// 🔄 3. AVANÇAR A ROLETA (Timer / Advance) - TURBINADA COM NEXT NOTEBOOK
 // ==========================================================
 func AdvanceCycleStep(c *gin.Context) {
 	spaceID := c.Param("space_id")
@@ -222,7 +225,7 @@ func AdvanceCycleStep(c *gin.Context) {
 
 	tx := database.DB.Begin()
 
-	// 1. Salva as horas estudadas pro gráfico
+	// 1. Salva as horas estudadas (com as Horas Extras embutidas)
 	session := models.StudySession{
 		UserID:         userID,
 		SpaceID:        uuid.MustParse(spaceID),
@@ -237,7 +240,7 @@ func AdvanceCycleStep(c *gin.Context) {
 		return
 	}
 
-	// 2. Gira a roleta (Sempre do Ciclo/Adaptive)
+	// 2. Gira a roleta
 	var strategy models.StudyStrategy
 	if err := tx.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
 		tx.Rollback()
@@ -245,18 +248,31 @@ func AdvanceCycleStep(c *gin.Context) {
 		return
 	}
 
+	var nextNotebookID *uuid.UUID
+
 	totalItems := len(strategy.Blocks)
 	if totalItems > 0 {
+		// A Matemática do Loop Infinito (Módulo)
 		strategy.CurrentStep = (strategy.CurrentStep + 1) % totalItems
 		tx.Save(&strategy)
+
+		// 🎁 PROCURA QUAL É O CADERNO DA PRÓXIMA MATÉRIA PARA O FRONT-END ABRIR DIRETO
+		for _, block := range strategy.Blocks {
+			// Sequence começa em 1, CurrentStep começa em 0
+			if block.Sequence == (strategy.CurrentStep + 1) {
+				nextNotebookID = block.NotebookID
+				break
+			}
+		}
 	}
 
 	tx.Commit()
 
 	c.JSON(200, gin.H{
-		"message":        "Tempo registrado e próximo card liberado!",
-		"actual_minutes": input.ActualDuration,
-		"next_step":      strategy.CurrentStep,
+		"message":          "Tempo registrado e próximo card liberado!",
+		"actual_minutes":   input.ActualDuration,
+		"next_step":        strategy.CurrentStep,
+		"next_notebook_id": nextNotebookID, // 👈 O PRESENTE DO MAYAN
 	})
 }
 

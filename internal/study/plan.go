@@ -212,6 +212,8 @@ func GenerateAutoPlan(c *gin.Context) {
 				"order":         0,
 				"created_by_id": parsedUserID,
 				"updated_by_id": parsedUserID,
+				"created_at":    time.Now(), // 👈 ADICIONE ISSO
+				"updated_at":    time.Now(), // 👈 ADICIONE ISSO
 			}).Error
 
 			if err != nil {

@@ -74,14 +74,14 @@ func CreatePage(c *gin.Context) {
 }
 
 // ==========================================================
-// 2️⃣ UPDATE PAGE
+// 2️⃣ UPDATE PAGE (Blindado contra Perda de Dados)
 // ==========================================================
 type UpdatePageInput struct {
-	Title   string                 `json:"title"`
-	Content map[string]interface{} `json:"content"`
-	Order   int                    `json:"order"`
-	GuideID *uuid.UUID             `json:"guide_id"`
-	Tags    *[]models.PageTag      `json:"tags"` // 👈 NOVO: Ponteiro para saber se o usuário enviou alteração de tags
+	Title   *string           `json:"title"`
+	Content *json.RawMessage  `json:"content"` // 👈 Agora usa a mesma tipagem da criação
+	Order   *int              `json:"order"`
+	GuideID *uuid.UUID        `json:"guide_id"`
+	Tags    *[]models.PageTag `json:"tags"`
 }
 
 func UpdatePage(c *gin.Context) {
@@ -103,33 +103,36 @@ func UpdatePage(c *gin.Context) {
 	}
 
 	var input UpdatePageInput
+	// 👇 Se o JSON vier quebrado, agora ele avisa o erro exato pro Front-end
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
 		return
 	}
 
+	// Inicia o mapa apenas com o ID de quem está atualizando
 	updates := map[string]interface{}{
-		"title":         input.Title,
-		"order":         input.Order,
 		"updated_by_id": parsedUserID,
 	}
 
+	// 👇 SÓ ATUALIZA O QUE O FRONT-END MANDAR DE FATO
+	if input.Title != nil {
+		updates["title"] = *input.Title
+	}
+	if input.Order != nil {
+		updates["order"] = *input.Order
+	}
 	if input.GuideID != nil {
 		updates["guide_id"] = input.GuideID
 	}
-
-	// 👇 VERIFICA E ATUALIZA AS TAGS
 	if input.Tags != nil {
 		updates["tags"] = *input.Tags
 	}
-
-	if len(input.Content) > 0 {
-		contentBytes, _ := json.Marshal(input.Content)
-		updates["content"] = string(contentBytes)
+	if input.Content != nil {
+		updates["content"] = string(*input.Content)
 	}
 
 	if err := database.DB.Model(&page).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar página"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro do Banco ao atualizar página: " + err.Error()})
 		return
 	}
 
