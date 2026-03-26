@@ -41,7 +41,7 @@ type GenerateStrategyInput struct {
 	Source             string            `json:"source"`
 	TargetGoal         string            `json:"target_goal"`
 	HoursPerDay        float64           `json:"hours_per_day"`
-	AvailabilityID     *uuid.UUID        `json:"availability_id" binding:"required"`
+	AvailabilityID     *uuid.UUID        `json:"availability_id"` // 🚨 TIREI O BINDING DAQUI! (Isso conserta o Erro 400 do Ciclo)
 	FreeTimePreference int               `json:"free_time_preference"`
 	MinSessionMin      int               `json:"min_session_minutes"`
 	MaxSessionMin      int               `json:"max_session_minutes"`
@@ -117,7 +117,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 }
 
 // ==========================================================
-// 🚀 1. GERAR CRONOGRAMA (FIXED) - BLINDADO COM TRATAMENTO DE ERROS
+// 🚀 1. GERAR CRONOGRAMA (FIXED) - BYPASS DE TAGS E VALIDAÇÃO MANUAL
 // ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -127,7 +127,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// 🛡️ PARSER SEGURO DO USER_ID (Evita falhas silenciosas de tipagem)
 	userIDInterface, _ := c.Get("userID")
 	var parsedUserID uuid.UUID
 	switch v := userIDInterface.(type) {
@@ -143,6 +142,12 @@ func GenerateAutoPlan(c *gin.Context) {
 	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(400, gin.H{"error": "Dados inválidos enviados pelo front-end."})
+		return
+	}
+
+	// 👇 Validação manual: Se for plano fixo, TEM que ter a rotina
+	if input.AvailabilityID == nil {
+		c.JSON(400, gin.H{"error": "Para gerar um Cronograma Fixo, você precisa enviar o availability_id."})
 		return
 	}
 
@@ -162,7 +167,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		return
 	}
 
-	// Força o modo FIXED
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "fixed"}
@@ -175,14 +179,10 @@ func GenerateAutoPlan(c *gin.Context) {
 
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
-	// ==========================================================
-	// 🛠️ MÁGICA ANTI-DUPLICAÇÃO E CRIAÇÃO DE PÁGINA
-	// ==========================================================
 	notebooksCriados := make(map[string]uuid.UUID)
 
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
-
 			if idSalvo, jaCriou := notebooksCriados[disc.Name]; jaCriou {
 				input.Disciplines[i].NotebookID = &idSalvo
 				continue
@@ -195,22 +195,25 @@ func GenerateAutoPlan(c *gin.Context) {
 				CreatedByID: parsedUserID,
 				UpdatedByID: parsedUserID,
 			}
-			// 👇 Agora ele caça o erro e te avisa!
 			if err := tx.Create(&newNb).Error; err != nil {
 				tx.Rollback()
 				c.JSON(500, gin.H{"error": "Erro ao criar caderno de " + disc.Name + ": " + err.Error()})
 				return
 			}
 
-			newPage := models.Page{
-				NotebookID:  newNb.ID,
-				Title:       "Anotações - " + disc.Name,
-				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
-				Order:       0,
-				CreatedByID: parsedUserID,
-				UpdatedByID: parsedUserID,
-			}
-			if err := tx.Create(&newPage).Error; err != nil {
+			// 👇 MÁGICA AQUI: Inserção direta no banco ignorando o GORM. Mata o Erro das Tags 100%.
+			newPageID := uuid.New()
+			err := tx.Table("pages").Create(map[string]interface{}{
+				"id":            newPageID,
+				"notebook_id":   newNb.ID,
+				"title":         "Anotações - " + disc.Name,
+				"content":       "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				"order":         0,
+				"created_by_id": parsedUserID,
+				"updated_by_id": parsedUserID,
+			}).Error
+
+			if err != nil {
 				tx.Rollback()
 				c.JSON(500, gin.H{"error": "Erro ao criar página de " + disc.Name + ": " + err.Error()})
 				return
@@ -238,7 +241,6 @@ func GenerateAutoPlan(c *gin.Context) {
 	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
 
-	// MODO FIXED: Fatiar e encaixar nos horários da semana
 	baseBlocks := calculateDistribution(input.Disciplines, dailyMinutes, input.MinSessionMin, input.MaxSessionMin)
 	subjectIndex := 0
 	sessionLength := input.MaxSessionMin
@@ -334,7 +336,6 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
-	// 👇 TRAVA FINAL: Se o aluno não tiver tempo livre na semana, ou se der erro no banco, bloqueia!
 	if len(finalBlocks) > 0 {
 		if err := tx.Create(&finalBlocks).Error; err != nil {
 			tx.Rollback()

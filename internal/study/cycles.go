@@ -13,7 +13,7 @@ import (
 )
 
 // ==========================================================
-// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta)
+// 🚀 1. GERAR CICLO (ADAPTIVE - Roleta) - BYPASS DE TAGS
 // ==========================================================
 func GenerateAutoCycle(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -23,7 +23,17 @@ func GenerateAutoCycle(c *gin.Context) {
 		return
 	}
 
-	userID, _ := c.Get("userID")
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	default:
+		c.JSON(401, gin.H{"error": "Usuário não autenticado corretamente."})
+		return
+	}
 
 	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -33,67 +43,78 @@ func GenerateAutoCycle(c *gin.Context) {
 
 	tx := database.DB.Begin()
 
-	// Força o modo ADAPTIVE
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "adaptive"}
-		tx.Create(&strategy)
+		if err := tx.Create(&strategy).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco."})
+			return
+		}
 	}
 
-	// Limpa o ciclo velho desse Space
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
-	// ==========================================================
-	// 🛠️ MÁGICA ANTI-DUPLICAÇÃO E CRIAÇÃO DE PÁGINA
-	// ==========================================================
 	notebooksCriados := make(map[string]uuid.UUID)
 
 	for i, disc := range input.Disciplines {
 		if disc.NotebookID == nil || *disc.NotebookID == uuid.Nil {
 
-			// 1. CHECAGEM ANTI-DUPLICATA
 			if idSalvo, jaCriou := notebooksCriados[disc.Name]; jaCriou {
 				input.Disciplines[i].NotebookID = &idSalvo
 				continue
 			}
 
-			// 2. Cria APENAS 1 Caderno
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,
-				ColorHex:    "#3B82F6", // Azul padrão
-				CreatedByID: userID.(uuid.UUID),
-				UpdatedByID: userID.(uuid.UUID),
+				ColorHex:    "#3B82F6",
+				CreatedByID: parsedUserID,
+				UpdatedByID: parsedUserID,
 			}
-			tx.Create(&newNb)
-
-			// 3. Cria a primeira Página automaticamente
-			newPage := models.Page{
-				NotebookID:  newNb.ID,
-				Title:       "Anotações - " + disc.Name,
-				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
-				Order:       0,
-				CreatedByID: userID.(uuid.UUID),
-				UpdatedByID: userID.(uuid.UUID),
+			if err := tx.Create(&newNb).Error; err != nil {
+				tx.Rollback()
+				c.JSON(500, gin.H{"error": "Erro ao criar caderno de " + disc.Name + ": " + err.Error()})
+				return
 			}
-			tx.Create(&newPage)
 
-			// 4. Salva no mapa e vincula o ID
-			notebooksCriados[disc.Name] = newNb.ID
-			input.Disciplines[i].NotebookID = &newNb.ID
+			// 👇 MÁGICA DO BYPASS NO CICLO TAMBÉM
+			newPageID := uuid.New()
+			err := tx.Table("pages").Create(map[string]interface{}{
+				"id":            newPageID,
+				"notebook_id":   newNb.ID,
+				"title":         "Anotações - " + disc.Name,
+				"content":       "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				"order":         0,
+				"created_by_id": parsedUserID,
+				"updated_by_id": parsedUserID,
+			}).Error
+
+			if err != nil {
+				tx.Rollback()
+				c.JSON(500, gin.H{"error": "Erro ao criar página de " + disc.Name + ": " + err.Error()})
+				return
+			}
+
+			nbID := newNb.ID
+			notebooksCriados[disc.Name] = nbID
+			input.Disciplines[i].NotebookID = &nbID
 		}
 	}
 
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
 	strategy.MinSessionMin = input.MinSessionMin
-	strategy.CurrentStep = 0 // Zera a roleta sempre que recriar
-	tx.Save(&strategy)
+	strategy.CurrentStep = 0
+	if err := tx.Save(&strategy).Error; err != nil {
+		tx.Rollback()
+		c.JSON(500, gin.H{"error": "Erro ao salvar parâmetros da estratégia."})
+		return
+	}
 
 	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
 
-	// Matemática exclusiva do Ciclo (1 card por matéria)
 	var totalWeight float64 = 0
 	for _, disc := range input.Disciplines {
 		totalWeight += float64(disc.Importance + (6 - disc.Performance))
@@ -122,13 +143,21 @@ func GenerateAutoCycle(c *gin.Context) {
 	}
 
 	if len(finalBlocks) > 0 {
-		tx.Create(&finalBlocks)
+		if err := tx.Create(&finalBlocks).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao salvar os blocos no banco: " + err.Error()})
+			return
+		}
 	}
-	tx.Commit()
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(500, gin.H{"error": "Erro fatal ao confirmar transação: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Ciclo configurado com sucesso!",
-		"study_cycle": strategy, // Chave dedicada
+		"study_cycle": strategy,
 		"blocks":      finalBlocks,
 	})
 }
