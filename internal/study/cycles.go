@@ -3,6 +3,7 @@ package study
 import (
 	"math"
 	"net/http"
+	"time" // 👈 Importado para o Analytics e datas
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -41,10 +42,16 @@ func GenerateAutoCycle(c *gin.Context) {
 		return
 	}
 
+	if input.MinSessionMin <= 0 {
+		input.MinSessionMin = 30
+	}
+	if input.MaxSessionMin <= 0 {
+		input.MaxSessionMin = 50
+	}
+
 	tx := database.DB.Begin()
 
 	var strategy models.StudyStrategy
-	// 👇 Busca APENAS o ciclo adaptativo do USUÁRIO ATUAL
 	if err := tx.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{
 			SpaceID:       spaceID,
@@ -53,7 +60,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			HoursPerDay:   input.HoursPerDay,
 			MinSessionMin: input.MinSessionMin,
 			CurrentStep:   0,
-			CreatedByID:   parsedUserID, // 👈 IMPORTANTE: Salva que o dono desse ciclo é o usuário logado!
+			CreatedByID:   parsedUserID,
 		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
@@ -62,7 +69,6 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 	}
 
-	// Limpa apenas os blocos desse ciclo específico
 	tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
 	notebooksCriados := make(map[string]uuid.UUID)
@@ -75,6 +81,17 @@ func GenerateAutoCycle(c *gin.Context) {
 				continue
 			}
 
+			// 👇 RADAR ANTI-DUPLICAÇÃO (A MÁGICA DA FASE 3 AQUI!)
+			var existingNb models.Notebook
+			if err := tx.Where("space_id = ? AND name = ?", spaceID, disc.Name).First(&existingNb).Error; err == nil {
+				// O caderno já existe nesse Space! Reutiliza para não duplicar.
+				nbID := existingNb.ID
+				notebooksCriados[disc.Name] = nbID
+				input.Disciplines[i].NotebookID = &nbID
+				continue // Pula para a próxima matéria sem criar nada novo!
+			}
+
+			// Se o caderno NÃO existir na turma, aí sim ele cria um novinho:
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,
@@ -88,7 +105,6 @@ func GenerateAutoCycle(c *gin.Context) {
 				return
 			}
 
-			// 👇 SEM GAMBIARRA: Criação Limpa e Nativa do GORM
 			newPage := models.Page{
 				NotebookID:  newNb.ID,
 				Title:       "Anotações - " + disc.Name,
@@ -109,7 +125,6 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 	}
 
-	// Atualiza os dados se a estratégia já existia
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
 	strategy.MinSessionMin = input.MinSessionMin
@@ -146,6 +161,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			Performance:      disc.Performance,
 			SuggestedMinutes: suggestedMin,
 			Sequence:         sequence,
+			DayOfWeek:        disc.DayOfWeek,
 		})
 		sequence++
 	}
@@ -171,7 +187,7 @@ func GenerateAutoCycle(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR O CICLO (Com Mágica de Clonagem)
+// 📋 2. LISTAR O CICLO (Com Mágica de Clonagem e Analytics Embutido)
 // ==========================================================
 func ListCycles(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -184,6 +200,18 @@ func ListCycles(c *gin.Context) {
 		parsedUserID = v
 	case string:
 		parsedUserID, _ = uuid.Parse(v)
+	}
+
+	// 🧠 FUNÇÃO NINJA: Calcula os minutos de HOJE desse aluno nessa turma
+	getTodayMinutes := func() int {
+		var total int
+		now := time.Now()
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+		database.DB.Model(&models.StudySession{}).
+			Where("user_id = ? AND space_id = ? AND created_at >= ?", parsedUserID, spaceID, startOfDay).
+			Select("COALESCE(SUM(actual_minutes), 0)").Scan(&total)
+		return total
 	}
 
 	var strategy models.StudyStrategy
@@ -220,7 +248,14 @@ func ListCycles(c *gin.Context) {
 				}
 
 				newStrategy.Blocks = newBlocks
-				c.JSON(200, gin.H{"study_cycle": newStrategy})
+
+				// 👇 RESPOSTA CLONADA COM O RELÓGIO (Analytics)
+				c.JSON(200, gin.H{
+					"study_cycle": newStrategy,
+					"analytics": gin.H{
+						"today_minutes": getTodayMinutes(),
+					},
+				})
 				return
 			}
 		}
@@ -228,12 +263,17 @@ func ListCycles(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"message":     "Nenhum ciclo configurado ainda",
 			"study_cycle": nil,
+			"analytics":   gin.H{"today_minutes": 0},
 		})
 		return
 	}
 
+	// 👇 RESPOSTA NORMAL COM O RELÓGIO (Analytics)
 	c.JSON(200, gin.H{
 		"study_cycle": strategy,
+		"analytics": gin.H{
+			"today_minutes": getTodayMinutes(),
+		},
 	})
 }
 
@@ -366,4 +406,109 @@ func DeleteCycleBlock(c *gin.Context) {
 	blockID := c.Param("block_id")
 	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
 	c.JSON(200, gin.H{"message": "Card removido"})
+}
+
+// ==========================================================
+// 🛠️ 5. SUPER ROTA DE EDIÇÃO TOTAL (Sync de Ciclo)
+// ==========================================================
+
+type SuperEditCycleInput struct {
+	TargetGoal    *string  `json:"target_goal"`
+	HoursPerDay   *float64 `json:"hours_per_day"`
+	MinSessionMin *int     `json:"min_session_minutes"`
+	CurrentStep   *int     `json:"current_step"` // Caso o aluno queira pular para o meio do ciclo
+	Blocks        []struct {
+		ID               *uuid.UUID `json:"id"` // Se for um card já existente
+		Activity         string     `json:"activity"`
+		NotebookID       *uuid.UUID `json:"notebook_id"`
+		SuggestedMinutes int        `json:"suggested_minutes"`
+		Sequence         int        `json:"sequence"`
+		DayOfWeek        *int       `json:"day_of_week"`
+	} `json:"blocks"` // Array exato de como a tela ficou após ele editar
+}
+
+func UpdateFullCycle(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
+	var input SuperEditCycleInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+
+	// 1. Acha o ciclo do cara
+	var strategy models.StudyStrategy
+	if err := tx.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy).Error; err != nil {
+		tx.Rollback()
+		c.JSON(404, gin.H{"error": "Ciclo não encontrado."})
+		return
+	}
+
+	// 2. Atualiza os dados principais (SÓ O QUE ELE MANDAR)
+	updates := map[string]interface{}{}
+	if input.TargetGoal != nil {
+		updates["target_goal"] = *input.TargetGoal
+	}
+	if input.HoursPerDay != nil {
+		updates["hours_per_day"] = *input.HoursPerDay
+	}
+	if input.MinSessionMin != nil {
+		updates["min_session_minutes"] = *input.MinSessionMin
+	}
+	if input.CurrentStep != nil {
+		updates["current_step"] = *input.CurrentStep
+	}
+
+	if len(updates) > 0 {
+		if err := tx.Model(&strategy).Updates(updates).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao atualizar estratégia."})
+			return
+		}
+	}
+
+	// 3. Atualiza os Blocos (Apaga tudo e reescreve do jeito que o Front mandou)
+	if len(input.Blocks) > 0 {
+		// Limpa os blocos velhos
+		tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
+
+		// Insere a nova ordem customizada pelo aluno
+		var newBlocks []models.StudyBlock
+		for _, b := range input.Blocks {
+			newBlock := models.StudyBlock{
+				StrategyID:       strategy.ID,
+				Activity:         b.Activity,
+				NotebookID:       b.NotebookID,
+				SuggestedMinutes: b.SuggestedMinutes,
+				Sequence:         b.Sequence,
+				DayOfWeek:        b.DayOfWeek,
+			}
+			// Se o block já tinha ID (foi só editado e não criado do zero), mantém o ID
+			if b.ID != nil && *b.ID != uuid.Nil {
+				newBlock.ID = *b.ID
+			}
+			newBlocks = append(newBlocks, newBlock)
+		}
+
+		if err := tx.Create(&newBlocks).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao salvar a nova ordem dos cards."})
+			return
+		}
+	}
+
+	tx.Commit()
+
+	c.JSON(200, gin.H{"message": "Ciclo inteiro atualizado com sucesso!"})
 }

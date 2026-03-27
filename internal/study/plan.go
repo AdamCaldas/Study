@@ -24,6 +24,7 @@ type DisciplineInput struct {
 	Name        string     `json:"name"`
 	Importance  int        `json:"importance"`
 	Performance int        `json:"performance"`
+	DayOfWeek   *int       `json:"day_of_week"` // 👈 ADICIONE ESSA LINHA AQUI!
 }
 
 type DailyScheduleInput struct {
@@ -193,6 +194,17 @@ func GenerateAutoPlan(c *gin.Context) {
 				continue
 			}
 
+			// 👇 RADAR ANTI-DUPLICAÇÃO DO CRONOGRAMA (A MÁGICA DA FASE 3 AQUI!)
+			var existingNb models.Notebook
+			if err := tx.Where("space_id = ? AND name = ?", spaceID, disc.Name).First(&existingNb).Error; err == nil {
+				// O caderno já existe nesse Space! Reutiliza para não duplicar.
+				nbID := existingNb.ID
+				notebooksCriados[disc.Name] = nbID
+				input.Disciplines[i].NotebookID = &nbID
+				continue // Pula para a próxima matéria sem criar nada novo!
+			}
+
+			// Se o caderno NÃO existir na turma, aí sim ele cria um novinho:
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,

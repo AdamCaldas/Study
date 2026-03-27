@@ -117,6 +117,8 @@ func main() {
 		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
+		// Exemplo de como deve ficar a rota lá no seu main.go / routes.go:
+		protected.PUT("/spaces/:space_id/cycles/full-update", study.UpdateFullCycle)
 
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)
