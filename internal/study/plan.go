@@ -206,21 +206,16 @@ func GenerateAutoPlan(c *gin.Context) {
 				return
 			}
 
-			// 👇 MÁGICA DO BYPASS DE TAGS (Raw Map) com Datas!
-			newPageID := uuid.New()
-			err := tx.Table("pages").Create(map[string]interface{}{
-				"id":            newPageID,
-				"notebook_id":   newNb.ID,
-				"title":         "Anotações - " + disc.Name,
-				"content":       json.RawMessage("{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}"), // 👈 A SOLUÇÃO
-				"order":         0,
-				"created_by_id": parsedUserID,
-				"updated_by_id": parsedUserID,
-				"created_at":    time.Now(),
-				"updated_at":    time.Now(),
-			}).Error
-
-			if err != nil {
+			// 👇 SEM GAMBIARRA: Criação Limpa e Nativa do GORM
+			newPage := models.Page{
+				NotebookID:  newNb.ID,
+				Title:       "Anotações - " + disc.Name,
+				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				Order:       0,
+				CreatedByID: parsedUserID,
+				UpdatedByID: parsedUserID,
+			}
+			if err := tx.Create(&newPage).Error; err != nil {
 				tx.Rollback()
 				c.JSON(500, gin.H{"error": "Erro ao criar página de " + disc.Name + ": " + err.Error()})
 				return

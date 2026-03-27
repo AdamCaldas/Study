@@ -164,7 +164,7 @@ type Page struct {
 	Content string `gorm:"type:jsonb" json:"content"`
 	Order   int    `json:"order"`
 
-	Tags []PageTag `gorm:"type:jsonb;default:'[]'" json:"tags"`
+	Tags []PageTag `gorm:"type:jsonb;serializer:json;default:'[]'" json:"tags"`
 
 	// 👇 NOVO: Relacionamento com as Notas Privadas do Aluno
 	Notes []PageNote `gorm:"foreignKey:PageID;constraint:OnDelete:CASCADE" json:"notes"`
