@@ -41,7 +41,7 @@ type GenerateStrategyInput struct {
 	Source             string            `json:"source"`
 	TargetGoal         string            `json:"target_goal"`
 	HoursPerDay        float64           `json:"hours_per_day"`
-	AvailabilityID     *uuid.UUID        `json:"availability_id"` // 🚨 TIREI O BINDING DAQUI! (Isso conserta o Erro 400 do Ciclo)
+	AvailabilityID     *uuid.UUID        `json:"availability_id"` // 🚨 Sem binding para não quebrar o ciclo
 	FreeTimePreference int               `json:"free_time_preference"`
 	MinSessionMin      int               `json:"min_session_minutes"`
 	MaxSessionMin      int               `json:"max_session_minutes"`
@@ -167,9 +167,13 @@ func GenerateAutoPlan(c *gin.Context) {
 	}
 
 	var strategy models.StudyStrategy
-	// 👇 Busca APENAS o cronograma fixo dessa turma
-	if err := tx.Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
-		strategy = models.StudyStrategy{SpaceID: spaceID, Mode: "fixed"}
+	// 👇 Busca APENAS o cronograma fixo DO USUÁRIO LOGADO
+	if err := tx.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
+		strategy = models.StudyStrategy{
+			SpaceID:     spaceID,
+			Mode:        "fixed",
+			CreatedByID: parsedUserID, // 👈 Salva que o dono é ele
+		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
 			c.JSON(500, gin.H{"error": "Erro ao criar estratégia principal no banco: " + err.Error()})
@@ -202,18 +206,18 @@ func GenerateAutoPlan(c *gin.Context) {
 				return
 			}
 
-			// 👇 MÁGICA DO BYPASS DE TAGS (Raw Map)
+			// 👇 MÁGICA DO BYPASS DE TAGS (Raw Map) com Datas!
 			newPageID := uuid.New()
 			err := tx.Table("pages").Create(map[string]interface{}{
 				"id":            newPageID,
 				"notebook_id":   newNb.ID,
 				"title":         "Anotações - " + disc.Name,
-				"content":       "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				"content":       json.RawMessage("{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}"), // 👈 A SOLUÇÃO
 				"order":         0,
 				"created_by_id": parsedUserID,
 				"updated_by_id": parsedUserID,
-				"created_at":    time.Now(), // 👈 ADICIONE ISSO
-				"updated_at":    time.Now(), // 👈 ADICIONE ISSO
+				"created_at":    time.Now(),
+				"updated_at":    time.Now(),
 			}).Error
 
 			if err != nil {
@@ -364,15 +368,58 @@ func GenerateAutoPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR CRONOGRAMA (Apenas FIXED)
+// 📋 2. LISTAR CRONOGRAMA (Com Mágica de Clonagem)
 // ==========================================================
 func ListPlans(c *gin.Context) {
-	spaceID := c.Param("space_id")
+	spaceIDStr := c.Param("space_id")
+	spaceID, _ := uuid.Parse(spaceIDStr)
+
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
 
 	var strategy models.StudyStrategy
+	// 1️⃣ Busca o Plano do Usuário Logado
 	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
 		return db.Order("day_of_week ASC, start_time ASC")
-	}).Where("space_id = ? AND mode = 'fixed'", spaceID).First(&strategy).Error; err != nil {
+	}).Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
+
+		// 2️⃣ SE ELE NÃO TEM... CLONA DO DONO DO SPACE!
+		var space models.Space
+		if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err == nil {
+			var ownerStrategy models.StudyStrategy
+
+			// 👇 AQUI USAMOS O OwnerID DA SUA MODEL
+			if err := database.DB.Preload("Blocks").Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, space.OwnerID).First(&ownerStrategy).Error; err == nil && space.OwnerID != parsedUserID {
+
+				// 🧬 FAZ A CLONAGEM
+				newStrategy := ownerStrategy
+				newStrategy.ID = uuid.New()
+				newStrategy.CreatedByID = parsedUserID
+				database.DB.Create(&newStrategy)
+
+				var newBlocks []models.StudyBlock
+				for _, b := range ownerStrategy.Blocks {
+					newBlock := b
+					newBlock.ID = uuid.New()
+					newBlock.StrategyID = newStrategy.ID
+					newBlocks = append(newBlocks, newBlock)
+				}
+				if len(newBlocks) > 0 {
+					database.DB.Create(&newBlocks)
+				}
+
+				newStrategy.Blocks = newBlocks
+				c.JSON(200, gin.H{"study_strategy": newStrategy})
+				return
+			}
+		}
+
 		c.JSON(200, gin.H{
 			"message":        "Nenhum cronograma configurado ainda",
 			"study_strategy": nil,
@@ -386,7 +433,7 @@ func ListPlans(c *gin.Context) {
 }
 
 // ==========================================================
-// ✏️ 3. CRUD MANUAL DOS BLOCOS DO CRONOGRAMA
+// ✏️ 3. CRUD MANUAL DOS BLOCOS DO CRONOGRAMA (BLINDADO)
 // ==========================================================
 func CreateStudyPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -396,8 +443,18 @@ func CreateStudyPlan(c *gin.Context) {
 		return
 	}
 
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	var strategy models.StudyStrategy
-	database.DB.Where("space_id = ? AND mode = 'fixed'", spaceIDStr).First(&strategy)
+	// 👇 BLINDAGEM: Garante que tá criando no plano DELE.
+	database.DB.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 	if strategy.ID == uuid.Nil {
 		c.JSON(400, gin.H{"error": "Você precisa gerar um cronograma base primeiro."})
 		return
@@ -423,8 +480,18 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&input)
 
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	var strategy models.StudyStrategy
-	database.DB.Where("space_id = ? AND mode = 'fixed'", spaceIDStr).First(&strategy)
+	// 👇 BLINDAGEM NO EM MASSA TAMBÉM
+	database.DB.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 
 	var blocks []models.StudyBlock
 	for _, p := range input.Plans {

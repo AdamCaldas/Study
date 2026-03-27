@@ -1,6 +1,7 @@
 package study
 
 import (
+	"encoding/json"
 	"math"
 	"net/http"
 	"time"
@@ -45,8 +46,8 @@ func GenerateAutoCycle(c *gin.Context) {
 	tx := database.DB.Begin()
 
 	var strategy models.StudyStrategy
-	// 👇 Busca APENAS o ciclo adaptativo dessa turma
-	if err := tx.Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
+	// 👇 Busca APENAS o ciclo adaptativo do USUÁRIO ATUAL
+	if err := tx.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
 		strategy = models.StudyStrategy{
 			SpaceID:       spaceID,
 			Mode:          "adaptive",
@@ -54,6 +55,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			HoursPerDay:   input.HoursPerDay,
 			MinSessionMin: input.MinSessionMin,
 			CurrentStep:   0,
+			CreatedByID:   parsedUserID, // 👈 IMPORTANTE: Salva que o dono desse ciclo é o usuário logado!
 		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
@@ -94,12 +96,12 @@ func GenerateAutoCycle(c *gin.Context) {
 				"id":            newPageID,
 				"notebook_id":   newNb.ID,
 				"title":         "Anotações - " + disc.Name,
-				"content":       "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
+				"content":       json.RawMessage("{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}"), // 👈 A SOLUÇÃO
 				"order":         0,
 				"created_by_id": parsedUserID,
 				"updated_by_id": parsedUserID,
-				"created_at":    time.Now(), // 👈 ADICIONE ISSO
-				"updated_at":    time.Now(), // 👈 ADICIONE ISSO
+				"created_at":    time.Now(),
+				"updated_at":    time.Now(),
 			}).Error
 
 			if err != nil {
@@ -176,15 +178,60 @@ func GenerateAutoCycle(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR O CICLO (Apenas ADAPTIVE)
+// 📋 2. LISTAR O CICLO (Com Mágica de Clonagem)
 // ==========================================================
 func ListCycles(c *gin.Context) {
-	spaceID := c.Param("space_id")
+	spaceIDStr := c.Param("space_id")
+	spaceID, _ := uuid.Parse(spaceIDStr)
+
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
 
 	var strategy models.StudyStrategy
+	// 1️⃣ Tenta buscar o ciclo DO USUÁRIO LOGADO primeiro
 	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
 		return db.Order("sequence ASC")
-	}).Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
+	}).Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
+
+		// 2️⃣ SE ELE NÃO TEM UM CICLO... VAMOS CLONAR O DO DONO DO SPACE!
+		var space models.Space
+		if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err == nil {
+			var ownerStrategy models.StudyStrategy
+
+			// Pega a estratégia original do Dono do Space
+			if err := database.DB.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, space.OwnerID).First(&ownerStrategy).Error; err == nil && space.OwnerID != parsedUserID {
+
+				// 🧬 FAZ A CLONAGEM!
+				newStrategy := ownerStrategy
+				newStrategy.ID = uuid.New()            // Gera um ID novo
+				newStrategy.CreatedByID = parsedUserID // Passa pro nome do convidado
+				newStrategy.CurrentStep = 0            // 👈 ZERA A ROLETA PRA ELE!
+				database.DB.Create(&newStrategy)
+
+				// Clona os cards/matérias vinculados ao ciclo
+				var newBlocks []models.StudyBlock
+				for _, b := range ownerStrategy.Blocks {
+					newBlock := b
+					newBlock.ID = uuid.New()
+					newBlock.StrategyID = newStrategy.ID // Vincula ao novo ciclo
+					newBlocks = append(newBlocks, newBlock)
+				}
+				if len(newBlocks) > 0 {
+					database.DB.Create(&newBlocks)
+				}
+
+				newStrategy.Blocks = newBlocks
+				c.JSON(200, gin.H{"study_cycle": newStrategy})
+				return
+			}
+		}
+
 		c.JSON(200, gin.H{
 			"message":     "Nenhum ciclo configurado ainda",
 			"study_cycle": nil,
@@ -198,7 +245,7 @@ func ListCycles(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔄 3. AVANÇAR A ROLETA (Timer / Advance) - TURBINADA COM NEXT NOTEBOOK
+// 🔄 3. AVANÇAR A ROLETA (Timer / Advance) - BLINDADO POR DONO
 // ==========================================================
 func AdvanceCycleStep(c *gin.Context) {
 	spaceID := c.Param("space_id")
@@ -225,7 +272,6 @@ func AdvanceCycleStep(c *gin.Context) {
 
 	tx := database.DB.Begin()
 
-	// 1. Salva as horas estudadas (com as Horas Extras embutidas)
 	session := models.StudySession{
 		UserID:         userID,
 		SpaceID:        uuid.MustParse(spaceID),
@@ -240,11 +286,11 @@ func AdvanceCycleStep(c *gin.Context) {
 		return
 	}
 
-	// 2. Gira a roleta
 	var strategy models.StudyStrategy
-	if err := tx.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive'", spaceID).First(&strategy).Error; err != nil {
+	// 👇 BLINDAGEM: Só avança o ciclo do cara logado!
+	if err := tx.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, userID).First(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Ciclo não encontrado"})
+		c.JSON(404, gin.H{"error": "Ciclo não encontrado para este usuário."})
 		return
 	}
 
@@ -252,13 +298,10 @@ func AdvanceCycleStep(c *gin.Context) {
 
 	totalItems := len(strategy.Blocks)
 	if totalItems > 0 {
-		// A Matemática do Loop Infinito (Módulo)
 		strategy.CurrentStep = (strategy.CurrentStep + 1) % totalItems
 		tx.Save(&strategy)
 
-		// 🎁 PROCURA QUAL É O CADERNO DA PRÓXIMA MATÉRIA PARA O FRONT-END ABRIR DIRETO
 		for _, block := range strategy.Blocks {
-			// Sequence começa em 1, CurrentStep começa em 0
 			if block.Sequence == (strategy.CurrentStep + 1) {
 				nextNotebookID = block.NotebookID
 				break
@@ -272,12 +315,12 @@ func AdvanceCycleStep(c *gin.Context) {
 		"message":          "Tempo registrado e próximo card liberado!",
 		"actual_minutes":   input.ActualDuration,
 		"next_step":        strategy.CurrentStep,
-		"next_notebook_id": nextNotebookID, // 👈 O PRESENTE DO MAYAN
+		"next_notebook_id": nextNotebookID,
 	})
 }
 
 // ==========================================================
-// ✏️ 4. CRUD MANUAL DO CICLO (Opcional - Adicionar Card Extra)
+// ✏️ 4. CRUD MANUAL DO CICLO (Blindado)
 // ==========================================================
 func CreateCycleBlock(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -287,8 +330,18 @@ func CreateCycleBlock(c *gin.Context) {
 		return
 	}
 
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
 	var strategy models.StudyStrategy
-	database.DB.Where("space_id = ? AND mode = 'adaptive'", spaceIDStr).First(&strategy)
+	// 👇 BLINDAGEM: Garante que tá criando no ciclo DELE.
+	database.DB.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 	if strategy.ID == uuid.Nil {
 		c.JSON(400, gin.H{"error": "Você precisa gerar um ciclo base primeiro."})
 		return
