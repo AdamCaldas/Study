@@ -75,6 +75,7 @@ func main() {
 		protected.POST("/me/become-teacher", users.BecomeTeacher)
 		protected.POST("/me/availability", users.SaveAvailabilityProfile)
 		protected.GET("/me/analytics", study.GetMyStudyAnalytics)
+		protected.GET("/me/dashboard", study.GetPersonalDashboard)
 
 		// 👉 Rotas de Configuração do Usuário
 		protected.PUT("/availability/:availability_id", study.UpdateAvailabilityProfile)
@@ -117,6 +118,7 @@ func main() {
 		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
+
 		// Exemplo de como deve ficar a rota lá no seu main.go / routes.go:
 		protected.PUT("/spaces/:space_id/cycles/full-update", study.UpdateFullCycle)
 
@@ -133,6 +135,7 @@ func main() {
 			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks)
 			spaceRoutes.GET("/notes", space.ListSpaceNotes)
 			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)
+			spaceRoutes.GET("/dashboard", study.GetSpaceDashboard)
 
 			// 👉 Setup e Moderação da Turma
 			spaceRoutes.PUT("", space.UpdateSpace)
