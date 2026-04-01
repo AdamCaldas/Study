@@ -89,6 +89,14 @@ func ConnectDB() {
 		&models.AvailabilityProfile{},
 
 		// ==========================================
+		// 📊 NOVO: TABELAS DE LOGS (Specs do Chefão)
+		// ==========================================
+		&models.CycleLog{},
+		&models.CycleLogBlock{},
+		&models.ScheduleLog{},
+		&models.ScheduleLogBlock{},
+
+		// ==========================================
 		// 👇 FASES 1 A 7 👇
 		// ==========================================
 		&models.Follower{},

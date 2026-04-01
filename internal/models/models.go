@@ -202,6 +202,7 @@ type StudyStrategy struct {
 	Source             string    `gorm:"size:50;not null;default:'user'" json:"source"` // NOVO: Trava Institucional
 	TargetGoal         string    `gorm:"size:255" json:"target_goal"`
 	HoursPerDay        float64   `json:"hours_per_day"`
+	StudyDays          []int     `gorm:"type:jsonb;serializer:json;default:'[]'" json:"study_days"` // 👈 ADICIONE ESTA LINHA
 	MinSessionMin      int       `gorm:"default:30" json:"min_session_minutes"`
 	MaxSessionMin      int       `gorm:"default:50" json:"max_session_minutes"`
 	FreeTimePreference int       `gorm:"default:0" json:"free_time_preference"`
@@ -567,4 +568,49 @@ type HelpArticle struct {
 	Order      int       `json:"order"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// ==========================================================
+// 📅 NOVO: LOGS DIÁRIOS DE EXECUÇÃO (A Pedido do Chefão)
+// ==========================================================
+
+// Logs do Ciclo (Adaptive)
+type CycleLog struct {
+	ID           uuid.UUID       `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID       uuid.UUID       `gorm:"type:uuid;index;not null" json:"user_id"`
+	SpaceID      uuid.UUID       `gorm:"type:uuid;index;not null" json:"space_id"`
+	CycleID      uuid.UUID       `gorm:"type:uuid;index;not null" json:"cycle_id"`
+	Date         time.Time       `gorm:"type:date;not null" json:"date"`
+	TotalMinutes int             `gorm:"default:0" json:"total_minutes"`
+	Blocks       []CycleLogBlock `gorm:"foreignKey:CycleLogID;constraint:OnDelete:CASCADE" json:"blocks"`
+}
+
+type CycleLogBlock struct {
+	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	CycleLogID     uuid.UUID `gorm:"type:uuid;index;not null" json:"cycle_log_id"`
+	BlockID        uuid.UUID `gorm:"type:uuid;index;not null" json:"block_id"`
+	Activity       string    `gorm:"size:255;not null" json:"activity"`
+	TotalMinutes   int       `gorm:"default:0" json:"total_minutes"`   // O tempo real estudado
+	PlannedMinutes int       `gorm:"default:0" json:"planned_minutes"` // A meta que o sistema pediu
+	MissingMinutes int       `gorm:"default:0" json:"missing_minutes"` // O que ele ficou devendo
+	LastActivityAt time.Time `json:"last_activity_at"`
+}
+
+// Logs do Cronograma Fixo (Schedules)
+type ScheduleLog struct {
+	ID           uuid.UUID          `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	UserID       uuid.UUID          `gorm:"type:uuid;index;not null" json:"user_id"`
+	SpaceID      uuid.UUID          `gorm:"type:uuid;index;not null" json:"space_id"`
+	ScheduleID   uuid.UUID          `gorm:"type:uuid;index;not null" json:"schedule_id"`
+	Date         time.Time          `gorm:"type:date;not null" json:"date"`
+	TotalMinutes int                `gorm:"default:0" json:"total_minutes"`
+	Blocks       []ScheduleLogBlock `gorm:"foreignKey:ScheduleLogID;constraint:OnDelete:CASCADE" json:"blocks"`
+}
+
+type ScheduleLogBlock struct {
+	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ScheduleLogID uuid.UUID `gorm:"type:uuid;index;not null" json:"schedule_log_id"`
+	BlockID       uuid.UUID `gorm:"type:uuid;index;not null" json:"block_id"`
+	Activity      string    `gorm:"size:255;not null" json:"activity"`
+	TotalMinutes  int       `gorm:"default:0" json:"total_minutes"`
 }

@@ -42,6 +42,7 @@ type GenerateStrategyInput struct {
 	Source             string            `json:"source"`
 	TargetGoal         string            `json:"target_goal"`
 	HoursPerDay        float64           `json:"hours_per_day"`
+	StudyDays          []int             `json:"study_days"`      // 👈 ADICIONE ESTA LINHA AQUI
 	AvailabilityID     *uuid.UUID        `json:"availability_id"` // 🚨 Sem binding para não quebrar o ciclo
 	FreeTimePreference int               `json:"free_time_preference"`
 	MinSessionMin      int               `json:"min_session_minutes"`
