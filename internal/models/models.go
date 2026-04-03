@@ -608,9 +608,14 @@ type ScheduleLog struct {
 }
 
 type ScheduleLogBlock struct {
-	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	ScheduleLogID uuid.UUID `gorm:"type:uuid;index;not null" json:"schedule_log_id"`
-	BlockID       uuid.UUID `gorm:"type:uuid;index;not null" json:"block_id"`
-	Activity      string    `gorm:"size:255;not null" json:"activity"`
-	TotalMinutes  int       `gorm:"default:0" json:"total_minutes"`
+	ID               uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	ScheduleLogID    uuid.UUID `gorm:"type:uuid;index;not null" json:"schedule_log_id"`
+	BlockID          uuid.UUID `gorm:"type:uuid;index;not null" json:"block_id"`
+	Activity         string    `gorm:"size:255;not null" json:"activity"`
+	PlannedStartTime string    `gorm:"size:8" json:"planned_start_time"`
+	PlannedEndTime   string    `gorm:"size:8" json:"planned_end_time"`
+	RealStartTime    string    `gorm:"size:8" json:"real_start_time"`
+	RealEndTime      string    `gorm:"size:8" json:"real_end_time"`
+	TotalMinutes     int       `gorm:"default:0" json:"total_minutes"`
+	HasRecalculation bool      `gorm:"default:false" json:"has_recalculation"`
 }

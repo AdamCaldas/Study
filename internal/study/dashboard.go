@@ -88,19 +88,27 @@ func GetSpaceDashboard(c *gin.Context) {
 		Where("space_id = ?", spaceIDStr).
 		Select("COALESCE(SUM(actual_minutes), 0)").Scan(&totalSpaceStudyMinutes)
 
-	// 4. Quem estudou mais? (Top 3 Colaboradores)
+	// ==========================================================
+	// 👇 4. Quem estudou mais? (O ÚNICO LUGAR QUE MEXEMOS!)
+	// ==========================================================
 	type TopStudent struct {
-		UserID  uuid.UUID `json:"user_id"`
-		Minutes int       `json:"minutes"`
+		UserID     uuid.UUID `json:"user_id"`
+		FullName   string    `json:"full_name"`           // 👈 Adicionado
+		ProfilePic string    `json:"profile_picture_url"` // 👈 Adicionado
+		Minutes    int       `json:"minutes"`
 	}
 	var topStudents []TopStudent
-	database.DB.Model(&models.StudySession{}).
-		Select("user_id, SUM(actual_minutes) as minutes").
-		Where("space_id = ?", spaceIDStr).
-		Group("user_id").
+
+	// O JOIN Ninja para puxar a foto e o nome do aluno junto com os minutos
+	database.DB.Table("study_sessions").
+		Select("study_sessions.user_id, users.full_name, users.profile_pic, SUM(study_sessions.actual_minutes) as minutes").
+		Joins("JOIN users ON users.id = study_sessions.user_id").
+		Where("study_sessions.space_id = ?", spaceIDStr).
+		Group("study_sessions.user_id, users.full_name, users.profile_pic").
 		Order("minutes DESC").
 		Limit(3).
 		Scan(&topStudents)
+	// ==========================================================
 
 	// 5. Atividade Recente (Últimos 7 dias) para medir quem entrou/saiu
 	var recentActivity int64
@@ -122,8 +130,8 @@ func GetSpaceDashboard(c *gin.Context) {
 		"engagement": gin.H{
 			"total_study_hours":     totalSpaceStudyMinutes / 60,
 			"total_study_minutes":   totalSpaceStudyMinutes,
-			"recent_actions_7_days": recentActivity, // Mede se a turma tá parada ou ativa
+			"recent_actions_7_days": recentActivity,
 		},
-		"top_students": topStudents, // Array com os caras que mais focaram
+		"top_students": topStudents, // Agora devolve com as fotos!
 	})
 }

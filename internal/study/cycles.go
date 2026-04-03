@@ -3,7 +3,7 @@ package study
 import (
 	"math"
 	"net/http"
-	"time" // 👈 Importado para o Analytics e datas
+	"time"
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -58,7 +58,9 @@ func GenerateAutoCycle(c *gin.Context) {
 			Mode:          "adaptive",
 			TargetGoal:    input.TargetGoal,
 			HoursPerDay:   input.HoursPerDay,
+			StudyDays:     input.StudyDays,
 			MinSessionMin: input.MinSessionMin,
+			MaxSessionMin: input.MaxSessionMin,
 			CurrentStep:   0,
 			CreatedByID:   parsedUserID,
 		}
@@ -81,17 +83,14 @@ func GenerateAutoCycle(c *gin.Context) {
 				continue
 			}
 
-			// 👇 RADAR ANTI-DUPLICAÇÃO (A MÁGICA DA FASE 3 AQUI!)
 			var existingNb models.Notebook
 			if err := tx.Where("space_id = ? AND name = ?", spaceID, disc.Name).First(&existingNb).Error; err == nil {
-				// O caderno já existe nesse Space! Reutiliza para não duplicar.
 				nbID := existingNb.ID
 				notebooksCriados[disc.Name] = nbID
 				input.Disciplines[i].NotebookID = &nbID
-				continue // Pula para a próxima matéria sem criar nada novo!
+				continue
 			}
 
-			// Se o caderno NÃO existir na turma, aí sim ele cria um novinho:
 			newNb := models.Notebook{
 				SpaceID:     spaceID,
 				Name:        disc.Name,
@@ -127,7 +126,9 @@ func GenerateAutoCycle(c *gin.Context) {
 
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
+	strategy.StudyDays = input.StudyDays
 	strategy.MinSessionMin = input.MinSessionMin
+	strategy.MaxSessionMin = input.MaxSessionMin
 	strategy.CurrentStep = 0
 	if err := tx.Save(&strategy).Error; err != nil {
 		tx.Rollback()
@@ -187,7 +188,7 @@ func GenerateAutoCycle(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR O CICLO COM LOGS, HORAS EXATAS E DÍVIDAS
+// 📋 2. LISTAR O CICLO (Preserva o JSON original do banco)
 // ==========================================================
 func ListCycles(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -206,8 +207,39 @@ func ListCycles(c *gin.Context) {
 	if err := database.DB.Preload("Blocks", func(db *gorm.DB) *gorm.DB {
 		return db.Order("sequence ASC")
 	}).Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
-		c.JSON(200, gin.H{"message": "Nenhum ciclo encontrado.", "study_cycle": nil})
-		return
+
+		var space models.Space
+		if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err == nil {
+			var ownerStrategy models.StudyStrategy
+
+			if err := database.DB.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, space.OwnerID).First(&ownerStrategy).Error; err == nil && space.OwnerID != parsedUserID {
+
+				newStrategy := ownerStrategy
+				newStrategy.ID = uuid.New()
+				newStrategy.CreatedByID = parsedUserID
+				newStrategy.CurrentStep = 0
+				database.DB.Create(&newStrategy)
+
+				var newBlocks []models.StudyBlock
+				for _, b := range ownerStrategy.Blocks {
+					newBlock := b
+					newBlock.ID = uuid.New()
+					newBlock.StrategyID = newStrategy.ID
+					newBlocks = append(newBlocks, newBlock)
+				}
+				if len(newBlocks) > 0 {
+					database.DB.Create(&newBlocks)
+				}
+				newStrategy.Blocks = newBlocks
+				strategy = newStrategy
+			} else {
+				c.JSON(200, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
+				return
+			}
+		} else {
+			c.JSON(200, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
+			return
+		}
 	}
 
 	now := time.Now()
@@ -218,7 +250,6 @@ func ListCycles(c *gin.Context) {
 		database.DB.Save(&strategy)
 	}
 
-	// 1. Busca os LOGS DE HOJE
 	var todayLog models.CycleLog
 	database.DB.Preload("Blocks").Where("cycle_id = ? AND date = ?", strategy.ID, today).First(&todayLog)
 
@@ -226,24 +257,24 @@ func ListCycles(c *gin.Context) {
 	var todayAnalyticsBlocks []map[string]interface{}
 
 	for _, b := range todayLog.Blocks {
-		todayBlocksMap[b.BlockID] = b
+		todayBlocksMap[b.BlockID] = b // Mantém o BlockID para o banco original
 		todayAnalyticsBlocks = append(todayAnalyticsBlocks, map[string]interface{}{
 			"block_id":         b.BlockID,
 			"activity":         b.Activity,
 			"total_minutes":    b.TotalMinutes,
 			"planned_minutes":  b.PlannedMinutes,
-			"missing_minutes":  b.MissingMinutes, // O que ficou devendo
-			"last_activity_at": b.LastActivityAt, // Data e Hora EXATAS
+			"missing_minutes":  b.MissingMinutes,
+			"last_activity_at": b.LastActivityAt,
 		})
 	}
 	if todayAnalyticsBlocks == nil {
 		todayAnalyticsBlocks = []map[string]interface{}{}
 	}
 
-	// 2. Formata os Blocos do Ciclo
 	var responseBlocks []map[string]interface{}
 	for _, block := range strategy.Blocks {
 		logData := todayBlocksMap[block.ID]
+
 		responseBlocks = append(responseBlocks, map[string]interface{}{
 			"id":                        block.ID,
 			"strategy_id":               block.StrategyID,
@@ -257,11 +288,10 @@ func ListCycles(c *gin.Context) {
 			"day_of_week":               block.DayOfWeek,
 			"accumulated_minutes_today": logData.TotalMinutes,
 			"missing_minutes_today":     logData.MissingMinutes,
-			"last_activity_at":          logData.LastActivityAt, // Data e hora injetada aqui também!
+			"last_activity_at":          logData.LastActivityAt,
 		})
 	}
 
-	// 3. Busca o HISTÓRICO DOS LOGS PASSADOS
 	var pastLogs []models.CycleLog
 	database.DB.Preload("Blocks").Where("cycle_id = ? AND date < ?", strategy.ID, today).Order("date DESC").Find(&pastLogs)
 
@@ -275,7 +305,7 @@ func ListCycles(c *gin.Context) {
 				"total_minutes":    plb.TotalMinutes,
 				"planned_minutes":  plb.PlannedMinutes,
 				"missing_minutes":  plb.MissingMinutes,
-				"last_activity_at": plb.LastActivityAt, // Histórico com horas exatas!
+				"last_activity_at": plb.LastActivityAt,
 			})
 		}
 		formattedLogs = append(formattedLogs, map[string]interface{}{
@@ -300,6 +330,7 @@ func ListCycles(c *gin.Context) {
 			"source":               strategy.Source,
 			"target_goal":          strategy.TargetGoal,
 			"hours_per_day":        strategy.HoursPerDay,
+			"study_days":           strategy.StudyDays,
 			"min_session_minutes":  strategy.MinSessionMin,
 			"max_session_minutes":  strategy.MaxSessionMin,
 			"free_time_preference": strategy.FreeTimePreference,
@@ -314,7 +345,7 @@ func ListCycles(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔄 3. AVANÇAR A ROLETA E SALVAR LOGS DIÁRIOS (Com Dívida de Tempo)
+// 🔄 3. AVANÇAR A ROLETA E SALVAR LOGS DIÁRIOS
 // ==========================================================
 func AdvanceCycleStep(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -357,7 +388,6 @@ func AdvanceCycleStep(c *gin.Context) {
 		strategy.CurrentStep = 0
 	}
 
-	// 1. Atualiza o Log Geral
 	var cycleLog models.CycleLog
 	if err := tx.Where("user_id = ? AND space_id = ? AND cycle_id = ? AND date = ?", userID, spaceID, strategy.ID, today).First(&cycleLog).Error; err != nil {
 		cycleLog = models.CycleLog{UserID: userID, SpaceID: spaceID, CycleID: strategy.ID, Date: today, TotalMinutes: 0}
@@ -366,13 +396,11 @@ func AdvanceCycleStep(c *gin.Context) {
 	cycleLog.TotalMinutes += input.ActualDuration
 	tx.Save(&cycleLog)
 
-	// 2. MATEMÁTICA: O cara ficou devendo tempo?
 	missing := input.PlannedMinutes - input.ActualDuration
 	if missing < 0 {
-		missing = 0 // Se fez hora extra, a dívida é 0
+		missing = 0
 	}
 
-	// 3. Atualiza o Bloco Específico (Agora com Hora Exata e Dívida)
 	if input.BlockID != uuid.Nil {
 		var logBlock models.CycleLogBlock
 		if err := tx.Where("cycle_log_id = ? AND block_id = ?", cycleLog.ID, input.BlockID).First(&logBlock).Error; err != nil {
@@ -382,11 +410,10 @@ func AdvanceCycleStep(c *gin.Context) {
 		logBlock.TotalMinutes += input.ActualDuration
 		logBlock.PlannedMinutes += input.PlannedMinutes
 		logBlock.MissingMinutes += missing
-		logBlock.LastActivityAt = now // 👈 SALVA A DATA, HORA, MINUTO E SEGUNDO EXATOS
+		logBlock.LastActivityAt = now
 		tx.Save(&logBlock)
 	}
 
-	// Salva a sessão avulsa para gráficos históricos
 	session := models.StudySession{
 		UserID:         userID,
 		SpaceID:        spaceID,
@@ -396,7 +423,6 @@ func AdvanceCycleStep(c *gin.Context) {
 	}
 	tx.Create(&session)
 
-	// Gira a roleta
 	var nextNotebookID *uuid.UUID
 	totalItems := len(strategy.Blocks)
 	if totalItems > 0 {
@@ -425,9 +451,14 @@ func AdvanceCycleStep(c *gin.Context) {
 // ==========================================================
 // ✏️ 4. CRUD MANUAL DO CICLO (Blindado)
 // ==========================================================
+type CreateCycleBlockInput struct {
+	Activity   string     `json:"activity" binding:"required"`
+	NotebookID *uuid.UUID `json:"notebook_id"`
+}
+
 func CreateCycleBlock(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	var input CreateManualBlockInput
+	var input CreateCycleBlockInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(400, gin.H{"error": "Dados inválidos."})
 		return
@@ -443,7 +474,6 @@ func CreateCycleBlock(c *gin.Context) {
 	}
 
 	var strategy models.StudyStrategy
-	// 👇 BLINDAGEM: Garante que tá criando no ciclo DELE.
 	database.DB.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 	if strategy.ID == uuid.Nil {
 		c.JSON(400, gin.H{"error": "Você precisa gerar um ciclo base primeiro."})
@@ -462,7 +492,7 @@ func CreateCycleBlock(c *gin.Context) {
 
 func UpdateCycleBlock(c *gin.Context) {
 	blockID := c.Param("block_id")
-	var input CreateManualBlockInput
+	var input CreateCycleBlockInput
 	c.ShouldBindJSON(&input)
 
 	database.DB.Model(&models.StudyBlock{}).Where("id = ?", blockID).Updates(map[string]interface{}{
@@ -481,13 +511,12 @@ func DeleteCycleBlock(c *gin.Context) {
 // ==========================================================
 // 🛠️ 5. SUPER ROTA DE EDIÇÃO TOTAL (Sync de Ciclo)
 // ==========================================================
-
 type SuperEditCycleInput struct {
 	TargetGoal    *string  `json:"target_goal"`
 	HoursPerDay   *float64 `json:"hours_per_day"`
-	StudyDays     []int    `json:"study_days"` // 👈 Novo campo adicionado
+	StudyDays     []int    `json:"study_days"`
 	MinSessionMin *int     `json:"min_session_minutes"`
-	MaxSessionMin *int     `json:"max_session_minutes"` // 👈 Faltava o Máximo!
+	MaxSessionMin *int     `json:"max_session_minutes"`
 	CurrentStep   *int     `json:"current_step"`
 	Blocks        []struct {
 		ID               *uuid.UUID `json:"id"`
@@ -534,13 +563,13 @@ func UpdateFullCycle(c *gin.Context) {
 		updates["hours_per_day"] = *input.HoursPerDay
 	}
 	if input.StudyDays != nil {
-		updates["study_days"] = input.StudyDays // GORM converte em JSON automático
+		updates["study_days"] = input.StudyDays
 	}
 	if input.MinSessionMin != nil {
-		updates["min_session_min"] = *input.MinSessionMin // 👈 O BUG ESTAVA AQUI (nome correto da coluna)
+		updates["min_session_min"] = *input.MinSessionMin
 	}
 	if input.MaxSessionMin != nil {
-		updates["max_session_min"] = *input.MaxSessionMin // 👈 O BUG ESTAVA AQUI (nome correto da coluna)
+		updates["max_session_min"] = *input.MaxSessionMin
 	}
 	if input.CurrentStep != nil {
 		updates["current_step"] = *input.CurrentStep
@@ -554,7 +583,19 @@ func UpdateFullCycle(c *gin.Context) {
 		}
 	}
 
-	// Atualiza os Blocos
+	// 👇 A MÁGICA INVISÍVEL AQUI: Salva os IDs velhos na memória antes de apagar!
+	var oldBlocks []models.StudyBlock
+	tx.Where("strategy_id = ?", strategy.ID).Find(&oldBlocks)
+
+	oldIdMap := make(map[string]uuid.UUID)
+	for _, ob := range oldBlocks {
+		if ob.NotebookID != nil && *ob.NotebookID != uuid.Nil {
+			oldIdMap[ob.NotebookID.String()] = ob.ID
+		} else {
+			oldIdMap[ob.Activity] = ob.ID
+		}
+	}
+
 	if len(input.Blocks) > 0 {
 		tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
@@ -568,9 +609,23 @@ func UpdateFullCycle(c *gin.Context) {
 				Sequence:         b.Sequence,
 				DayOfWeek:        b.DayOfWeek,
 			}
+
+			// Tenta usar o ID que o Front mandou ou resgata o original da memória!
 			if b.ID != nil && *b.ID != uuid.Nil {
 				newBlock.ID = *b.ID
+			} else {
+				var key string
+				if b.NotebookID != nil && *b.NotebookID != uuid.Nil {
+					key = b.NotebookID.String()
+				} else {
+					key = b.Activity
+				}
+
+				if savedID, exists := oldIdMap[key]; exists {
+					newBlock.ID = savedID // O ID É PRESERVADO AQUI! O vínculo não quebra.
+				}
 			}
+
 			newBlocks = append(newBlocks, newBlock)
 		}
 
