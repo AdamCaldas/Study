@@ -394,10 +394,17 @@ type StudentDossier struct {
 }
 
 type QuestionBankItem struct {
-	ID            uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	TeacherID     uuid.UUID `gorm:"type:uuid;index;not null" json:"teacher_id"`
+	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	TeacherID uuid.UUID `gorm:"type:uuid;index;not null" json:"teacher_id"` // ID do criador (Aluno ou Admin)
+
+	// 👇 NOVOS CAMPOS PARA OS FILTROS DO FRONT-END
+	Title      string `gorm:"size:255" json:"title"`                  // Ex: "Questão 136" ou "Minha Questão"
+	Discipline string `gorm:"size:100" json:"discipline"`             // Ex: "Matemática", "História"
+	Year       int    `json:"year"`                                   // Ex: 2022
+	Source     string `gorm:"size:50;default:'custom'" json:"source"` // Ex: "ENEM" ou "CUSTOM"
+
 	QuestionText  string    `gorm:"type:text;not null" json:"question_text"`
-	QuestionType  string    `gorm:"size:50;not null" json:"question_type"`
+	QuestionType  string    `gorm:"size:50;not null;default:'multiple_choice'" json:"question_type"`
 	Options       string    `gorm:"type:jsonb" json:"options"`
 	CorrectAnswer string    `gorm:"type:text" json:"correct_answer"`
 	Points        int       `gorm:"default:1" json:"points"`
@@ -618,4 +625,31 @@ type ScheduleLogBlock struct {
 	RealEndTime      string    `gorm:"size:8" json:"real_end_time"`
 	TotalMinutes     int       `gorm:"default:0" json:"total_minutes"`
 	HasRecalculation bool      `gorm:"default:false" json:"has_recalculation"`
+}
+
+// ==========================================================
+// ⚔️ ARENA 1x1 (DESAFIOS GAMIFICADOS)
+// ==========================================================
+type ArenaMatch struct {
+	ID           uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID      uuid.UUID  `gorm:"type:uuid;index;not null" json:"space_id"`
+	ChallengerID uuid.UUID  `gorm:"type:uuid;index;not null" json:"challenger_id"` // Quem chamou pro duelo
+	OpponentID   *uuid.UUID `gorm:"type:uuid;index" json:"opponent_id"`            // Quem foi desafiado (Pode ser nulo se for desafio aberto)
+
+	Status string `gorm:"size:20;default:'pending'" json:"status"` // pending (aguardando), active (em andamento), completed (finalizado)
+
+	QuestionIDs    string `gorm:"type:jsonb" json:"question_ids"` // Salvamos um array de IDs pra garantir que a prova é a mesma pros dois
+	TotalQuestions int    `gorm:"default:20" json:"total_questions"`
+	TimeLimitMin   int    `gorm:"default:30" json:"time_limit_min"` // Tempo máximo em minutos (0 a 120)
+
+	// Placares e Tempos
+	ChallengerScore *int `json:"challenger_score"` // Quantas acertou
+	OpponentScore   *int `json:"opponent_score"`
+	ChallengerTime  *int `json:"challenger_time"` // Tempo gasto em segundos
+	OpponentTime    *int `json:"opponent_time"`
+
+	WinnerID *uuid.UUID `gorm:"type:uuid" json:"winner_id"` // O grande campeão
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

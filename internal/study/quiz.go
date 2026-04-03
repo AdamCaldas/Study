@@ -2,7 +2,6 @@ package study
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -342,106 +341,4 @@ func ListSpaceQuizzes(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
-}
-
-// ==========================================================
-// 📥 FASE 5: IMPORTAR E PUXAR QUESTÕES DO ENEM (Via JSON do Yunger7)
-// ==========================================================
-
-// Estruturas de espelhamento do repositório ENEM API
-type EnemAlternative struct {
-	Letter    string  `json:"letter"`
-	Text      string  `json:"text"`
-	File      *string `json:"file"`
-	IsCorrect bool    `json:"isCorrect"`
-}
-
-type EnemQuestion struct {
-	Title        string            `json:"title"`
-	Discipline   string            `json:"discipline"`
-	Year         int               `json:"year"`
-	Context      string            `json:"context"`
-	Alternatives []EnemAlternative `json:"alternatives"`
-}
-
-// ==========================================================
-// 📥 FASE 5: IMPORTAR E PUXAR QUESTÕES DO ENEM (Via JSON do Yunger7)
-// ==========================================================
-
-// 🚀 1. Sincronizador de Questões (Insere JSON no banco - ALUNOS E PROFS)
-func ImportEnemQuestions(c *gin.Context) {
-	// Pega o ID de quem está logado (Aluno, Professor ou Admin)
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
-	}
-
-	// O front-end envia um objeto com "questions": [ { ...questões do enem... } ]
-	var input struct {
-		Questions []EnemQuestion `json:"questions" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido. Verifique a estrutura.", "details": err.Error()})
-		return
-	}
-
-	var newQuestions []models.QuestionBankItem
-
-	for _, q := range input.Questions {
-		// Acha a letra da resposta correta no JSON
-		correctLetter := ""
-		for _, alt := range q.Alternatives {
-			if alt.IsCorrect {
-				correctLetter = alt.Letter
-				break
-			}
-		}
-
-		optionsBytes, _ := json.Marshal(q.Alternatives)
-
-		// Junta o título da questão e o contexto na mesma string formatada com HTML
-		questionText := fmt.Sprintf("<b>%s (%d) - %s</b><br><br>%s", q.Title, q.Year, q.Discipline, q.Context)
-
-		newQuestions = append(newQuestions, models.QuestionBankItem{
-			TeacherID:     userID, // 👈 Salvamos o ID do Aluno ou Professor aqui como o "Dono" do Upload!
-			QuestionText:  questionText,
-			QuestionType:  "multiple_choice",
-			Options:       string(optionsBytes),
-			CorrectAnswer: correctLetter,
-			Points:        1,
-		})
-	}
-
-	// Batch Insert: Salva dezenas/centenas de questões de uma vez
-	if len(newQuestions) > 0 {
-		if err := database.DB.Create(&newQuestions).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar as questões no banco."})
-			return
-		}
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": fmt.Sprintf("%d questões do ENEM importadas com sucesso!", len(newQuestions)),
-	})
-}
-
-// 🚀 2. Rota para o Front-end consumir as questões nos Desafios/Estudos
-func GetPublicQuestions(c *gin.Context) {
-	var questions []models.QuestionBankItem
-
-	// Buscamos 30 questões de forma aleatória para o Front montar a bateria do aluno
-	if err := database.DB.Order("RANDOM()").Limit(30).Find(&questions).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar questões."})
-		return
-	}
-
-	if questions == nil {
-		questions = []models.QuestionBankItem{}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
 }

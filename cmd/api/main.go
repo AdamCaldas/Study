@@ -80,13 +80,18 @@ func main() {
 		// 👉 Rotas de Configuração do Usuário
 		protected.PUT("/availability/:availability_id", study.UpdateAvailabilityProfile)
 
-		// 👉 Repositório Global do Professor
+		// 👉 Repositório Global do Professor (Questões Privadas)
 		protected.GET("/me/question-bank", study.GetMyQuestionBank)
 		protected.POST("/me/question-bank", study.SaveToQuestionBank)
 
-		// 👇 AS DUAS ROTAS NOVAS AQUI!
-		protected.POST("/questions/import-enem", study.ImportEnemQuestions)
-		protected.GET("/questions/public", study.GetPublicQuestions)
+		// =======================================================
+		// 📚 BANCO GLOBAL DE QUESTÕES (O Robô do ENEM)
+		// =======================================================
+		protected.POST("/questions/fetch-enem", study.FetchEnemFromWeb) // 1. O Robô que clona o GitHub
+		protected.POST("/questions", study.CreateCustomQuestion)        // 2. Aluno cria na mão
+		protected.GET("/questions", study.ListAllQuestions)             // 3. Lista tudo (com filtros)
+		protected.PUT("/questions/:id", study.UpdateQuestion)           // 4. Edita
+		protected.DELETE("/questions/:id", study.DeleteQuestion)        // 5. Apaga
 
 		// 👉 Notificações e Suporte (Bugs)
 		protected.GET("/notifications", admin.GetMyNotifications)
@@ -123,18 +128,13 @@ func main() {
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
 
-		// Exemplo de como deve ficar a rota lá no seu main.go / routes.go:
-		protected.PUT("/spaces/:space_id/cycles/full-update", study.UpdateFullCycle)
-
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)
 		// ------------------------------------------------------
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
-			// =======================================================
-			// ⚡ O NOVO PADRÃO "LAZY LOADING" (Mini-Rotas)
-			// =======================================================
+			// 👉 Mini-Rotas de Lazy Loading
 			spaceRoutes.GET("", space.GetSpaceDetails)
 			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks)
 			spaceRoutes.GET("/notes", space.ListSpaceNotes)
@@ -167,23 +167,24 @@ func main() {
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
 			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PATCH("/plans/execute", study.ExecutePlanBlock)
+			spaceRoutes.PUT("/plans/full-update", study.UpdateFullPlan)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
 			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
-			spaceRoutes.PUT("/plans/full-update", study.UpdateFullPlan)
 
 			// =======================================================
-			// 👉 MOTOR DO CICLO (ADAPTIVE - A Roleta)
+			// 👉 MOTOR DO CICLO (ADAPTIVE)
 			// =======================================================
 			spaceRoutes.POST("/cycles/auto-generate", study.GenerateAutoCycle)
 			spaceRoutes.GET("/cycles", study.ListCycles)
 			spaceRoutes.PATCH("/cycles/advance", study.AdvanceCycleStep)
+			spaceRoutes.PUT("/cycles/full-update", study.UpdateFullCycle) // 👈 Agora agrupado no lugar certo!
 			spaceRoutes.POST("/cycles/blocks", study.CreateCycleBlock)
 			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
 			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)
 
-			// 👉 Avaliações e Anti-Cola
+			// 👉 Avaliações Tradicionais (Ficarão como legado)
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
 			spaceRoutes.POST("/quizzes/:quiz_id/submit", study.SubmitQuiz)
@@ -206,7 +207,15 @@ func main() {
 			spaceRoutes.POST("/badges/:badge_id/award/:student_id", gamification.AwardBadge)
 			spaceRoutes.GET("/ranking", gamification.GetSpaceRanking)
 			spaceRoutes.PATCH("/ranking/toggle", gamification.ToggleSpaceRanking)
-			spaceRoutes.GET("/arena/live", gamification.JoinArenaMode)
+
+			// =======================================================
+			// ⚔️ ARENA 1x1 (O MOTOR DE DESAFIOS)
+			// =======================================================
+			spaceRoutes.POST("/arena", gamification.CreateArenaMatch)                     // 1. Cria desafio (manda convite)
+			spaceRoutes.POST("/arena/:match_id/accept", gamification.AcceptArenaMatch)    // 2. Aceita convite
+			spaceRoutes.GET("/arena/:match_id/questions", gamification.GetArenaQuestions) // 3. Puxa as questões (Anti-cheat ativado)
+			spaceRoutes.POST("/arena/:match_id/submit", gamification.SubmitArenaMatch)    // 4. Envia respostas
+			spaceRoutes.GET("/arena", gamification.ListArenaMatches)                      // 5. Histórico e Convites Pendentes
 
 			// 👉 Analytics e Automação (Painel do Diretor)
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
@@ -221,7 +230,6 @@ func main() {
 	godMode := router.Group("/v1/admin")
 	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
 	{
-		// (Rotas do Admin Global inalteradas...)
 		godMode.GET("/report", admin.GetPlatformReport)
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
