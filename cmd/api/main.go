@@ -221,6 +221,13 @@ func main() {
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
 			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
 			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
+
+			// =======================================================
+			// 🃏 FLASHCARDS (Decks)
+			// =======================================================
+			spaceRoutes.POST("/flashcards", study.SaveFlashcardDeck)              // Cria ou Edita (Envia ID na URL se for edição)
+			spaceRoutes.GET("/flashcards", study.ListFlashcardDecks)              // Lista com Filtros
+			spaceRoutes.DELETE("/flashcards/:deck_id", study.DeleteFlashcardDeck) // Apaga
 		}
 	}
 

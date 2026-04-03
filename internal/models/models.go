@@ -653,3 +653,33 @@ type ArenaMatch struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// ==========================================================
+// 🃏 FLASHCARDS (Baralhos e Cartas)
+// ==========================================================
+type FlashcardDeck struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`
+
+	Title       string `gorm:"size:255;not null" json:"title"`
+	Description string `gorm:"type:text" json:"description"`
+	Category    string `gorm:"size:100" json:"category"`     // Ex: Matemática
+	SubCategory string `gorm:"size:100" json:"sub_category"` // Ex: Álgebra
+
+	Cards []Flashcard `gorm:"foreignKey:DeckID;constraint:OnDelete:CASCADE;" json:"cards"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Flashcard struct {
+	ID     uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	DeckID uuid.UUID `gorm:"type:uuid;index;not null" json:"deck_id"`
+
+	Front string `gorm:"type:text;not null" json:"front"` // Frente da carta (Pergunta)
+	Back  string `gorm:"type:text;not null" json:"back"`  // Verso da carta (Resposta)
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
