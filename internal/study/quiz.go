@@ -2,6 +2,7 @@ package study
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -87,7 +88,6 @@ func ListQuizzes(c *gin.Context) {
 // 🏦 SALVAR QUESTÃO NO BANCO GLOBAL (Fase 3)
 // ==========================================================
 func SaveToQuestionBank(c *gin.Context) {
-	// 1. Pega o ID de quem está criando (Tem que ser Professor)
 	teacherIDInterface, _ := c.Get("userID")
 	var teacherID uuid.UUID
 	switch v := teacherIDInterface.(type) {
@@ -97,14 +97,12 @@ func SaveToQuestionBank(c *gin.Context) {
 		teacherID, _ = uuid.Parse(v)
 	}
 
-	// 2. Verifica se ele realmente é um TEACHER
 	var teacher models.User
 	if err := database.DB.Where("id = ? AND account_type = 'TEACHER'", teacherID).First(&teacher).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Apenas professores podem ter um Banco de Questões."})
 		return
 	}
 
-	// 3. Recebe os dados da questão
 	var input models.QuestionBankItem
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados da questão inválidos."})
@@ -113,7 +111,6 @@ func SaveToQuestionBank(c *gin.Context) {
 
 	input.TeacherID = teacherID
 
-	// 4. Salva no banco pessoal dele
 	if err := database.DB.Create(&input).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar no Banco de Questões."})
 		return
@@ -139,13 +136,11 @@ func GetMyQuestionBank(c *gin.Context) {
 	}
 
 	var questions []models.QuestionBankItem
-	// Busca todas as questões criadas por este professor
 	if err := database.DB.Where("teacher_id = ?", teacherID).Order("created_at desc").Find(&questions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar banco de questões."})
 		return
 	}
 
-	// Se for null, devolve array vazio pro Front não quebrar
 	if questions == nil {
 		questions = []models.QuestionBankItem{}
 	}
@@ -167,47 +162,40 @@ func SubmitQuiz(c *gin.Context) {
 		userID, _ = uuid.Parse(v)
 	}
 
-	// 1. Puxa a Prova e as Perguntas Originais do Banco
 	var quiz models.Quiz
 	if err := database.DB.Preload("Questions").Where("id = ?", quizID).First(&quiz).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Simulado não encontrado."})
 		return
 	}
 
-	// 2. Recebe as respostas do Aluno
 	var input struct {
-		Answers map[string]string `json:"answers"` // Map: "ID_DA_PERGUNTA": "A) 2"
+		Answers map[string]string `json:"answers"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de respostas inválido."})
 		return
 	}
 
-	// 3. O Robô Corretor (Sistema Híbrido)
 	var totalScore float64 = 0
-	hasOpenEnded := false // Flag para saber se o professor precisa corrigir manualmente depois
+	hasOpenEnded := false
 
 	for _, question := range quiz.Questions {
 		studentAnswer, answered := input.Answers[question.ID.String()]
 
 		if question.QuestionType == "multiple_choice" {
-			// Correção Automática
 			if answered && studentAnswer == question.CorrectAnswer {
 				totalScore += float64(question.Points)
 			}
 		} else if question.QuestionType == "open_ended" {
-			// Questão Dissertativa: O robô não corrige. Aciona a flag pro Professor!
 			hasOpenEnded = true
 		}
 	}
 
-	// 4. Define o Status do Resultado
 	status := "completed"
 	if hasOpenEnded {
-		status = "pending_review" // Aguardando o professor
+		status = "pending_review"
 	}
 
-	// 5. Salva o Boletim do Aluno
 	result := models.QuizResult{
 		QuizID:         quiz.ID,
 		UserID:         userID,
@@ -224,13 +212,9 @@ func SubmitQuiz(c *gin.Context) {
 	})
 }
 
-// ==========================================================
-// ⚔️ FASE 4: PROFESSOR LANÇA A NOTA MANUAL (Híbrido)
-// ==========================================================
 func GradeQuizManual(c *gin.Context) {
 	resultID := c.Param("result_id")
 
-	// Só pega a nota extra que o professor quer adicionar
 	var input struct {
 		ExtraPoints float64 `json:"extra_points" binding:"required"`
 	}
@@ -239,14 +223,12 @@ func GradeQuizManual(c *gin.Context) {
 		return
 	}
 
-	// Busca o boletim pendente
 	var result models.QuizResult
 	if err := database.DB.Where("id = ?", resultID).First(&result).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Resultado não encontrado."})
 		return
 	}
 
-	// Atualiza com a nota do professor e fecha a prova
 	database.DB.Model(&result).Updates(map[string]interface{}{
 		"score":  gorm.Expr("score + ?", input.ExtraPoints),
 		"status": "completed",
@@ -255,9 +237,6 @@ func GradeQuizManual(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Nota manual lançada com sucesso!"})
 }
 
-// ==========================================================
-// 🚨 FASE 4: SISTEMA ANTI-COLA (Pega no flagra)
-// ==========================================================
 func ReportCheatAttempt(c *gin.Context) {
 	quizID := c.Param("quiz_id")
 	userIDInterface, _ := c.Get("userID")
@@ -272,8 +251,6 @@ func ReportCheatAttempt(c *gin.Context) {
 	var quiz models.Quiz
 	database.DB.Select("space_id").Where("id = ?", quizID).First(&quiz)
 
-	// O Front-end manda um POST silencioso pra cá quando a aba do navegador perde o foco.
-	// Nós salvamos direto no ActivityLog para o Professor ver depois no Painel!
 	cheatLog := models.ActivityLog{
 		SpaceID: quiz.SpaceID,
 		UserID:  userID,
@@ -284,9 +261,6 @@ func ReportCheatAttempt(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Infração registrada silenciosamente."})
 }
 
-// ==========================================================
-// 🎓 FASE 4: EMITIR CERTIFICADO DE CONCLUSÃO (Formatura)
-// ==========================================================
 func ClaimCertificate(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	userIDInterface, _ := c.Get("userID")
@@ -298,7 +272,6 @@ func ClaimCertificate(c *gin.Context) {
 		userID, _ = uuid.Parse(v)
 	}
 
-	// 1. Verifica se o usuário já tem o certificado desse Space (para não gerar 2x)
 	var existingCert models.Certificate
 	if err := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&existingCert).Error; err == nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -308,7 +281,6 @@ func ClaimCertificate(c *gin.Context) {
 		return
 	}
 
-	// 2. Busca todas as notas (Boletim) do aluno neste Space
 	var results []models.QuizResult
 	database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).Find(&results)
 
@@ -317,7 +289,6 @@ func ClaimCertificate(c *gin.Context) {
 		return
 	}
 
-	// 3. Calcula a Média Geral do Aluno
 	var totalScore float64 = 0
 	var pendingExams bool = false
 
@@ -335,8 +306,6 @@ func ClaimCertificate(c *gin.Context) {
 
 	average := totalScore / float64(len(results))
 
-	// 4. REGRA DE NEGÓCIO: Média Mínima para aprovação (Ex: 6.0 ou 60%)
-	// Supondo que a prova vale 10, a média para passar é 6.
 	if average < 6.0 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":     "Sua média foi baixa. Estude mais um pouco e refaça os simulados para conseguir o certificado!",
@@ -345,7 +314,6 @@ func ClaimCertificate(c *gin.Context) {
 		return
 	}
 
-	// 5. O Aluno passou! Gera o Diploma oficial no banco.
 	newCert := models.Certificate{
 		SpaceID:      uuid.MustParse(spaceID),
 		UserID:       userID,
@@ -353,16 +321,12 @@ func ClaimCertificate(c *gin.Context) {
 	}
 	database.DB.Create(&newCert)
 
-	// O Front-end pega esse JSON de sucesso e mostra a tela de confetes com o botão "Baixar PDF"
 	c.JSON(http.StatusCreated, gin.H{
 		"message":     "Parabéns! Você concluiu o curso com sucesso.",
 		"certificate": newCert,
 	})
 }
 
-// ==========================================================
-// 📝 4. GET /spaces/:space_id/quizzes (Aba de Avaliações)
-// ==========================================================
 func ListSpaceQuizzes(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
@@ -373,9 +337,108 @@ func ListSpaceQuizzes(c *gin.Context) {
 	for i := range quizzes {
 		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
 			quizzes[i].IsLocked = true
-			quizzes[i].Questions = []models.QuizQuestion{} // Esconde as perguntas
+			quizzes[i].Questions = []models.QuizQuestion{}
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
+}
+
+// ==========================================================
+// 📥 FASE 5: IMPORTAR E PUXAR QUESTÕES DO ENEM (Via JSON do Yunger7)
+// ==========================================================
+
+// Estruturas de espelhamento do repositório ENEM API
+type EnemAlternative struct {
+	Letter    string  `json:"letter"`
+	Text      string  `json:"text"`
+	File      *string `json:"file"`
+	IsCorrect bool    `json:"isCorrect"`
+}
+
+type EnemQuestion struct {
+	Title        string            `json:"title"`
+	Discipline   string            `json:"discipline"`
+	Year         int               `json:"year"`
+	Context      string            `json:"context"`
+	Alternatives []EnemAlternative `json:"alternatives"`
+}
+
+// 🚀 1. Sincronizador de Questões (Insere JSON no banco)
+func ImportEnemQuestions(c *gin.Context) {
+	teacherIDInterface, _ := c.Get("userID")
+	var teacherID uuid.UUID
+	switch v := teacherIDInterface.(type) {
+	case uuid.UUID:
+		teacherID = v
+	case string:
+		teacherID, _ = uuid.Parse(v)
+	}
+
+	// 🚨 Opcional: Aqui você pode validar se o user é ADMIN pra não deixar qualquer um lotar o banco
+
+	// O front-end envia um objeto com "questions": [ { ...questões do enem... } ]
+	var input struct {
+		Questions []EnemQuestion `json:"questions" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido. Verifique a estrutura.", "details": err.Error()})
+		return
+	}
+
+	var newQuestions []models.QuestionBankItem
+
+	for _, q := range input.Questions {
+		// Acha a letra da resposta correta no JSON
+		correctLetter := ""
+		for _, alt := range q.Alternatives {
+			if alt.IsCorrect {
+				correctLetter = alt.Letter
+				break
+			}
+		}
+
+		optionsBytes, _ := json.Marshal(q.Alternatives)
+
+		// Junta o título da questão e o contexto na mesma string formatada com HTML
+		questionText := fmt.Sprintf("<b>%s (%d) - %s</b><br><br>%s", q.Title, q.Year, q.Discipline, q.Context)
+
+		newQuestions = append(newQuestions, models.QuestionBankItem{
+			TeacherID:     teacherID,
+			QuestionText:  questionText,
+			QuestionType:  "multiple_choice",
+			Options:       string(optionsBytes),
+			CorrectAnswer: correctLetter,
+			Points:        1,
+		})
+	}
+
+	// Batch Insert: Salva centenas de questões de uma vez de forma super leve
+	if len(newQuestions) > 0 {
+		if err := database.DB.Create(&newQuestions).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar as questões no banco."})
+			return
+		}
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": fmt.Sprintf("%d questões do ENEM importadas com sucesso pro banco!", len(newQuestions)),
+	})
+}
+
+// 🚀 2. Rota para o Front-end consumir as questões nos Desafios/Estudos
+func GetPublicQuestions(c *gin.Context) {
+	var questions []models.QuestionBankItem
+
+	// Buscamos 30 questões de forma aleatória para o Front montar a bateria do aluno
+	if err := database.DB.Order("RANDOM()").Limit(30).Find(&questions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar questões."})
+		return
+	}
+
+	if questions == nil {
+		questions = []models.QuestionBankItem{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"questions": questions})
 }

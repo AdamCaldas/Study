@@ -84,6 +84,10 @@ func main() {
 		protected.GET("/me/question-bank", study.GetMyQuestionBank)
 		protected.POST("/me/question-bank", study.SaveToQuestionBank)
 
+		// 👇 AS DUAS ROTAS NOVAS AQUI!
+		protected.POST("/questions/import-enem", study.ImportEnemQuestions)
+		protected.GET("/questions/public", study.GetPublicQuestions)
+
 		// 👉 Notificações e Suporte (Bugs)
 		protected.GET("/notifications", admin.GetMyNotifications)
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
@@ -162,6 +166,7 @@ func main() {
 			// =======================================================
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
 			spaceRoutes.GET("/plans", study.ListPlans)
+			spaceRoutes.PATCH("/plans/execute", study.ExecutePlanBlock)
 			spaceRoutes.POST("/plans", study.CreateStudyPlan)
 			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
