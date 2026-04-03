@@ -364,18 +364,21 @@ type EnemQuestion struct {
 	Alternatives []EnemAlternative `json:"alternatives"`
 }
 
-// 🚀 1. Sincronizador de Questões (Insere JSON no banco)
-func ImportEnemQuestions(c *gin.Context) {
-	teacherIDInterface, _ := c.Get("userID")
-	var teacherID uuid.UUID
-	switch v := teacherIDInterface.(type) {
-	case uuid.UUID:
-		teacherID = v
-	case string:
-		teacherID, _ = uuid.Parse(v)
-	}
+// ==========================================================
+// 📥 FASE 5: IMPORTAR E PUXAR QUESTÕES DO ENEM (Via JSON do Yunger7)
+// ==========================================================
 
-	// 🚨 Opcional: Aqui você pode validar se o user é ADMIN pra não deixar qualquer um lotar o banco
+// 🚀 1. Sincronizador de Questões (Insere JSON no banco - ALUNOS E PROFS)
+func ImportEnemQuestions(c *gin.Context) {
+	// Pega o ID de quem está logado (Aluno, Professor ou Admin)
+	userIDInterface, _ := c.Get("userID")
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	}
 
 	// O front-end envia um objeto com "questions": [ { ...questões do enem... } ]
 	var input struct {
@@ -404,7 +407,7 @@ func ImportEnemQuestions(c *gin.Context) {
 		questionText := fmt.Sprintf("<b>%s (%d) - %s</b><br><br>%s", q.Title, q.Year, q.Discipline, q.Context)
 
 		newQuestions = append(newQuestions, models.QuestionBankItem{
-			TeacherID:     teacherID,
+			TeacherID:     userID, // 👈 Salvamos o ID do Aluno ou Professor aqui como o "Dono" do Upload!
 			QuestionText:  questionText,
 			QuestionType:  "multiple_choice",
 			Options:       string(optionsBytes),
@@ -413,7 +416,7 @@ func ImportEnemQuestions(c *gin.Context) {
 		})
 	}
 
-	// Batch Insert: Salva centenas de questões de uma vez de forma super leve
+	// Batch Insert: Salva dezenas/centenas de questões de uma vez
 	if len(newQuestions) > 0 {
 		if err := database.DB.Create(&newQuestions).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar as questões no banco."})
@@ -422,7 +425,7 @@ func ImportEnemQuestions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": fmt.Sprintf("%d questões do ENEM importadas com sucesso pro banco!", len(newQuestions)),
+		"message": fmt.Sprintf("%d questões do ENEM importadas com sucesso!", len(newQuestions)),
 	})
 }
 

@@ -1,6 +1,7 @@
 package study
 
 import (
+	"encoding/json"
 	"math"
 	"net/http"
 	"time"
@@ -563,7 +564,11 @@ func UpdateFullCycle(c *gin.Context) {
 		updates["hours_per_day"] = *input.HoursPerDay
 	}
 	if input.StudyDays != nil {
-		updates["study_days"] = input.StudyDays
+		// 1. Transforma o array []int em bytes JSON
+		studyDaysBytes, _ := json.Marshal(input.StudyDays)
+
+		// 2. Converte pra String e FORÇA o Postgres a aceitar como jsonb
+		updates["study_days"] = gorm.Expr("?::jsonb", string(studyDaysBytes))
 	}
 	if input.MinSessionMin != nil {
 		updates["min_session_min"] = *input.MinSessionMin
