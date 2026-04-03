@@ -171,6 +171,7 @@ func main() {
 			spaceRoutes.POST("/plans/batch", study.CreateMultipleStudyPlans)
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
+			spaceRoutes.PUT("/plans/full-update", study.UpdateFullPlan)
 
 			// =======================================================
 			// 👉 MOTOR DO CICLO (ADAPTIVE - A Roleta)

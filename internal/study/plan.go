@@ -67,14 +67,14 @@ func timeToMinutes(t string) int {
 		return 0
 	}
 	var h, m int
-	fmt.Sscanf(t, "%d:%d", &h, &m) // Funciona com "10:00" ou "10:00:00"
+	fmt.Sscanf(t, "%d:%d", &h, &m)
 	return h*60 + m
 }
 
 func minutesToTime(m int) string {
 	h := (m / 60) % 24
 	mins := m % 60
-	return fmt.Sprintf("%02d:%02d:00", h, mins) // Retorna HH:MM:SS para o JSON
+	return fmt.Sprintf("%02d:%02d:00", h, mins)
 }
 
 func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
@@ -119,7 +119,7 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 }
 
 // ==========================================================
-// 🚀 1. GERAR CRONOGRAMA (FIXED)
+// 🚀 1. GERAR CRONOGRAMA (FIXED) - SEMANA TODA CORRIGIDA
 // ==========================================================
 func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -237,6 +237,7 @@ func GenerateAutoPlan(c *gin.Context) {
 	strategy.Source = input.Source
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
+	strategy.StudyDays = input.StudyDays // 👈 Salva nativamente
 	strategy.FreeTimePreference = input.FreeTimePreference
 	strategy.MinSessionMin = input.MinSessionMin
 	strategy.MaxSessionMin = input.MaxSessionMin
@@ -258,7 +259,18 @@ func GenerateAutoPlan(c *gin.Context) {
 	}
 	breakLength := 10
 
+	// 👇 FILTRO MÁGICO: Garante que vai gerar blocos apenas pros dias selecionados!
+	studyDaysMap := make(map[int]bool)
+	for _, d := range input.StudyDays {
+		studyDaysMap[d] = true
+	}
+
 	for _, dayConfig := range dailyAvailability {
+		// Ignora dias da rotina que o aluno NÃO quer estudar
+		if len(studyDaysMap) > 0 && !studyDaysMap[dayConfig.DayOfWeek] {
+			continue
+		}
+
 		timeline := make([]bool, 1440*2)
 
 		wake := timeToMinutes(dayConfig.WakeUpTime)
@@ -356,7 +368,7 @@ func GenerateAutoPlan(c *gin.Context) {
 	tx.Commit()
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Cronograma configurado com sucesso!",
+		"message":  "Cronograma da semana configurado com sucesso!",
 		"strategy": strategy,
 		"blocks":   finalBlocks,
 	})
@@ -426,7 +438,7 @@ func ListPlans(c *gin.Context) {
 
 	todayBlocksMap := make(map[uuid.UUID]models.ScheduleLogBlock)
 	for _, b := range todayLog.Blocks {
-		todayBlocksMap[b.BlockID] = b // 👈 Usa estritamente o BlockID como chave (Igual na models.go)
+		todayBlocksMap[b.BlockID] = b
 	}
 
 	var todayAnalyticsBlocks []map[string]interface{}
@@ -447,7 +459,7 @@ func ListPlans(c *gin.Context) {
 
 		var logData models.ScheduleLogBlock
 		executed := false
-		if val, ok := todayBlocksMap[b.ID]; ok { // 👈 Compara o ID do bloco atual com o que tá no log
+		if val, ok := todayBlocksMap[b.ID]; ok {
 			logData = val
 			executed = true
 		}
@@ -461,7 +473,7 @@ func ListPlans(c *gin.Context) {
 			}
 
 			todayAnalyticsBlocks = append(todayAnalyticsBlocks, map[string]interface{}{
-				"block_id":           b.ID, // 👈 Retornando block_id como chave principal
+				"block_id":           b.ID,
 				"activity":           b.Activity,
 				"planned_start_time": *b.StartTime + ":00",
 				"planned_end_time":   *b.EndTime + ":00",
@@ -478,7 +490,7 @@ func ListPlans(c *gin.Context) {
 			hasRecalc := shiftMinutes > 0
 
 			todayAnalyticsBlocks = append(todayAnalyticsBlocks, map[string]interface{}{
-				"block_id":            b.ID, // 👈 Retornando block_id
+				"block_id":            b.ID,
 				"activity":            b.Activity,
 				"planned_start_time":  *b.StartTime + ":00",
 				"planned_end_time":    *b.EndTime + ":00",
@@ -504,14 +516,126 @@ func ListPlans(c *gin.Context) {
 }
 
 // ==========================================================
-// ⏱️ 3. EXECUTAR E SALVAR BLOCO DO CRONOGRAMA (NOVO)
+// 🛠️ 3. SUPER ROTA DE EDIÇÃO TOTAL DO CRONOGRAMA (A NOVA MÁGICA!)
+// ==========================================================
+type SuperEditPlanInput struct {
+	TargetGoal    *string  `json:"target_goal"`
+	HoursPerDay   *float64 `json:"hours_per_day"`
+	StudyDays     []int    `json:"study_days"`
+	MinSessionMin *int     `json:"min_session_minutes"`
+	MaxSessionMin *int     `json:"max_session_minutes"`
+	Blocks        []struct {
+		ID               *uuid.UUID `json:"id"`
+		Activity         string     `json:"activity"`
+		NotebookID       *uuid.UUID `json:"notebook_id"`
+		DayOfWeek        *int       `json:"day_of_week"`
+		StartTime        *string    `json:"start_time"`
+		EndTime          *string    `json:"end_time"`
+		SuggestedMinutes int        `json:"suggested_minutes"`
+	} `json:"blocks"`
+}
+
+func UpdateFullPlan(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+
+	userIDInterface, _ := c.Get("userID")
+	var parsedUserID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		parsedUserID = v
+	case string:
+		parsedUserID, _ = uuid.Parse(v)
+	}
+
+	var input SuperEditPlanInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(400, gin.H{"error": "JSON inválido: " + err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+
+	var strategy models.StudyStrategy
+	if err := tx.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy).Error; err != nil {
+		tx.Rollback()
+		c.JSON(404, gin.H{"error": "Cronograma não encontrado."})
+		return
+	}
+
+	updates := map[string]interface{}{}
+	if input.TargetGoal != nil {
+		updates["target_goal"] = *input.TargetGoal
+	}
+	if input.HoursPerDay != nil {
+		updates["hours_per_day"] = *input.HoursPerDay
+	}
+	if input.StudyDays != nil {
+		// A MÁGICA DO POSTGRES AQUI TBM: Converte o Array e manda o banco forçar como JSONB
+		studyDaysBytes, _ := json.Marshal(input.StudyDays)
+		updates["study_days"] = gorm.Expr("?::jsonb", string(studyDaysBytes))
+	}
+	if input.MinSessionMin != nil {
+		updates["min_session_min"] = *input.MinSessionMin
+	}
+	if input.MaxSessionMin != nil {
+		updates["max_session_min"] = *input.MaxSessionMin
+	}
+
+	if len(updates) > 0 {
+		if err := tx.Model(&strategy).Updates(updates).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao atualizar estratégia: " + err.Error()})
+			return
+		}
+	}
+
+	if len(input.Blocks) > 0 {
+		// Apaga os velhos, mas PRESERVA os IDs na hora de recriar!
+		tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
+
+		var newBlocks []models.StudyBlock
+		for _, b := range input.Blocks {
+			newBlock := models.StudyBlock{
+				StrategyID:       strategy.ID,
+				Activity:         b.Activity,
+				NotebookID:       b.NotebookID,
+				DayOfWeek:        b.DayOfWeek,
+				StartTime:        b.StartTime,
+				EndTime:          b.EndTime,
+				SuggestedMinutes: b.SuggestedMinutes,
+			}
+
+			// Se o Front mandou o ID, a gente reusa! Isso mantém os relatórios (Analytics) funcionando!
+			if b.ID != nil && *b.ID != uuid.Nil {
+				newBlock.ID = *b.ID
+			} else {
+				newBlock.ID = uuid.New() // Se for um bloco novo, cria ID novo.
+			}
+
+			newBlocks = append(newBlocks, newBlock)
+		}
+
+		if err := tx.Create(&newBlocks).Error; err != nil {
+			tx.Rollback()
+			c.JSON(500, gin.H{"error": "Erro ao salvar a nova grade de horários."})
+			return
+		}
+	}
+
+	tx.Commit()
+
+	c.JSON(200, gin.H{"message": "Cronograma inteiro atualizado com sucesso!"})
+}
+
+// ==========================================================
+// ⏱️ 4. EXECUTAR E SALVAR BLOCO DO CRONOGRAMA
 // ==========================================================
 func ExecutePlanBlock(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	userIDInterface, _ := c.Get("userID")
 
 	var input struct {
-		BlockID          uuid.UUID `json:"block_id"` // 👈 O Front envia o block_id
+		BlockID          uuid.UUID `json:"block_id"`
 		ActivityName     string    `json:"activity"`
 		PlannedStartTime string    `json:"planned_start_time"`
 		PlannedEndTime   string    `json:"planned_end_time"`
@@ -545,14 +669,12 @@ func ExecutePlanBlock(c *gin.Context) {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
-	// 1. Atualiza ou Cria o Log do Dia
 	var scheduleLog models.ScheduleLog
 	if err := tx.Where("user_id = ? AND space_id = ? AND schedule_id = ? AND date = ?", userID, spaceID, strategy.ID, today).First(&scheduleLog).Error; err != nil {
 		scheduleLog = models.ScheduleLog{UserID: userID, SpaceID: spaceID, ScheduleID: strategy.ID, Date: today, TotalMinutes: 0}
 		tx.Create(&scheduleLog)
 	}
 
-	// 2. Calcula as horas líquidas reais
 	realStart := timeToMinutes(input.RealStartTime)
 	realEnd := timeToMinutes(input.RealEndTime)
 	duration := realEnd - realStart
@@ -563,7 +685,6 @@ func ExecutePlanBlock(c *gin.Context) {
 	scheduleLog.TotalMinutes += duration
 	tx.Save(&scheduleLog)
 
-	// 3. Atualiza o Bloco Específico ancorado no BlockID
 	hasRecalc := false
 	plannedEnd := timeToMinutes(input.PlannedEndTime)
 	if realEnd > plannedEnd {
@@ -575,7 +696,7 @@ func ExecutePlanBlock(c *gin.Context) {
 		if err := tx.Where("schedule_log_id = ? AND block_id = ?", scheduleLog.ID, input.BlockID).First(&logBlock).Error; err != nil {
 			logBlock = models.ScheduleLogBlock{
 				ScheduleLogID:    scheduleLog.ID,
-				BlockID:          input.BlockID, // 👈 Salva o BlockID exatamente como na sua models.go
+				BlockID:          input.BlockID,
 				Activity:         input.ActivityName,
 				PlannedStartTime: input.PlannedStartTime,
 				PlannedEndTime:   input.PlannedEndTime,
@@ -589,7 +710,6 @@ func ExecutePlanBlock(c *gin.Context) {
 		tx.Save(&logBlock)
 	}
 
-	// 4. Salva no gráfico macro (Study Sessions)
 	plannedStart := timeToMinutes(input.PlannedStartTime)
 	session := models.StudySession{
 		UserID:         userID,
@@ -609,7 +729,7 @@ func ExecutePlanBlock(c *gin.Context) {
 }
 
 // ==========================================================
-// ✏️ 4. CRUD MANUAL DOS BLOCOS DO CRONOGRAMA
+// ✏️ 5. CRUD MANUAL DOS BLOCOS DO CRONOGRAMA
 // ==========================================================
 func CreateStudyPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
