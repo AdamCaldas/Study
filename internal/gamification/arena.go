@@ -95,6 +95,13 @@ func AcceptArenaMatch(c *gin.Context) {
 		return
 	}
 
+	// 👇 A TRAVA DE SEGURANÇA: Impede o criador de aceitar o próprio duelo
+	if match.ChallengerID == playerID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Você não pode aceitar o seu próprio desafio! Aguarde alguém da turma aceitar."})
+		return
+	}
+
+	// Verifica se a partida ainda está disponível
 	if match.Status != "pending" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Este desafio já está em andamento ou foi finalizado."})
 		return
