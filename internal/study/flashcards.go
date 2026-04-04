@@ -10,27 +10,10 @@ import (
 )
 
 // ==========================================================
-// 📥 ESTRUTURA PARA RECEBER O BARALHO DO FRONT-END
+// ➕ 1. CRIAR UM FLASHCARD (Colaborativo)
 // ==========================================================
-type CreateDeckInput struct {
-	Title       string `json:"title" binding:"required"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-	SubCategory string `json:"sub_category"`
-	Cards       []struct {
-		ID    *uuid.UUID `json:"id"` // Opcional (usado na edição)
-		Front string     `json:"front" binding:"required"`
-		Back  string     `json:"back" binding:"required"`
-	} `json:"cards"`
-}
-
-// ==========================================================
-// ➕ 1. CRIAR OU EDITAR BARALHO DE FLASHCARDS COMPLETO
-// ==========================================================
-// Aqui o Dono do Space manda o baralho inteiro de uma vez (Super Update/Create)
-func SaveFlashcardDeck(c *gin.Context) {
+func CreateFlashcard(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	spaceID := uuid.MustParse(spaceIDStr)
 
 	userIDInterface, _ := c.Get("userID")
 	var userID uuid.UUID
@@ -41,110 +24,142 @@ func SaveFlashcardDeck(c *gin.Context) {
 		userID, _ = uuid.Parse(v)
 	}
 
-	var input CreateDeckInput
+	var input models.Flashcard
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos do Flashcard."})
 		return
 	}
 
-	deckIDStr := c.Query("deck_id") // Se vier na URL, é Edição. Se não, é Criação.
+	input.SpaceID = uuid.MustParse(spaceIDStr)
+	input.CreatedByID = userID
 
-	tx := database.DB.Begin()
-
-	var deck models.FlashcardDeck
-	if deckIDStr != "" {
-		// É uma EDIÇÃO
-		if err := tx.Where("id = ? AND space_id = ?", deckIDStr, spaceID).First(&deck).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusNotFound, gin.H{"error": "Baralho não encontrado."})
-			return
-		}
-		deck.Title = input.Title
-		deck.Description = input.Description
-		deck.Category = input.Category
-		deck.SubCategory = input.SubCategory
-		tx.Save(&deck)
-
-		// Apaga as cartas velhas para recriar (Cuidado: perde estatísticas individuais das cartas se houver no futuro)
-		// Para ficar simples e robusto agora: Apaga e recria.
-		tx.Where("deck_id = ?", deck.ID).Delete(&models.Flashcard{})
-	} else {
-		// É uma CRIAÇÃO NOVA
-		deck = models.FlashcardDeck{
-			SpaceID:     spaceID,
-			CreatedByID: userID,
-			Title:       input.Title,
-			Description: input.Description,
-			Category:    input.Category,
-			SubCategory: input.SubCategory,
-		}
-		if err := tx.Create(&deck).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar baralho."})
-			return
-		}
+	if err := database.DB.Create(&input).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Flashcard."})
+		return
 	}
 
-	// Cria as Cartas
-	var newCards []models.Flashcard
-	for _, cardInput := range input.Cards {
-		newCards = append(newCards, models.Flashcard{
-			DeckID: deck.ID,
-			Front:  cardInput.Front,
-			Back:   cardInput.Back,
-		})
-	}
+	// Puxa os dados do criador pra devolver completinho pro Front
+	database.DB.Preload("Creator").First(&input, input.ID)
 
-	if len(newCards) > 0 {
-		tx.Create(&newCards)
-	}
-
-	tx.Commit()
-
-	// Retorna o baralho recém salvo com as cartas
-	database.DB.Preload("Cards").First(&deck, deck.ID)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Baralho salvo com sucesso!",
-		"deck":    deck,
+	c.JSON(http.StatusCreated, gin.H{
+		"message":   "Flashcard criado e adicionado à turma!",
+		"flashcard": input,
 	})
 }
 
 // ==========================================================
-// 📋 2. LISTAR BARALHOS (Com Filtros)
+// 📋 2. LISTAR FLASHCARDS (Com Filtros e Pesquisa de Texto)
 // ==========================================================
-func ListFlashcardDecks(c *gin.Context) {
+func ListFlashcards(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	category := c.Query("category")        // Filtro: ?category=Matemática
-	subCategory := c.Query("sub_category") // Filtro: ?sub_category=Álgebra
 
-	query := database.DB.Preload("Cards").Where("space_id = ?", spaceID)
+	// Pega os filtros da URL
+	category := c.Query("category")
+	subCategory := c.Query("sub_category")
+	searchQuery := c.Query("search") // 👈 O NOVO FILTRO DE PESQUISA POR TEXTO!
 
+	// O Preload("Creator") traz o Nome do aluno que fez o card
+	query := database.DB.Preload("Creator").Where("space_id = ?", spaceID)
+
+	// Aplica os filtros dinamicamente se o Front-end mandar
 	if category != "" {
 		query = query.Where("category = ?", category)
 	}
 	if subCategory != "" {
 		query = query.Where("sub_category = ?", subCategory)
 	}
+	if searchQuery != "" {
+		// Pesquisa a palavra digitada tanto no Título quanto na Pergunta (Front) da carta
+		query = query.Where("title ILIKE ? OR front ILIKE ?", "%"+searchQuery+"%", "%"+searchQuery+"%")
+	}
 
-	var decks []models.FlashcardDeck
-	query.Order("created_at desc").Find(&decks)
+	var flashcards []models.Flashcard
+	query.Order("created_at desc").Find(&flashcards)
 
-	c.JSON(http.StatusOK, gin.H{"decks": decks})
+	c.JSON(http.StatusOK, gin.H{"flashcards": flashcards})
 }
 
 // ==========================================================
-// 🗑️ 3. APAGAR UM BARALHO
+// ✏️ 3. EDITAR FLASHCARD (Regra de Permissão)
 // ==========================================================
-func DeleteFlashcardDeck(c *gin.Context) {
+func UpdateFlashcard(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	deckID := c.Param("deck_id")
+	cardID := c.Param("card_id")
+	userIDInterface, _ := c.Get("userID")
 
-	// O GORM vai apagar as cartas em cascata automaticamente devido à configuração OnDelete:CASCADE
-	if err := database.DB.Where("id = ? AND space_id = ?", deckID, spaceID).Delete(&models.FlashcardDeck{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deletar baralho."})
+	var playerID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		playerID = v
+	case string:
+		playerID, _ = uuid.Parse(v)
+	}
+
+	var input models.Flashcard
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Baralho removido da turma!"})
+	var space models.Space
+	database.DB.Where("id = ?", spaceID).First(&space)
+
+	var card models.Flashcard
+	if err := database.DB.Where("id = ? AND space_id = ?", cardID, spaceID).First(&card).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Flashcard não encontrado."})
+		return
+	}
+
+	// 🚨 TRAVA DE SEGURANÇA: Só o Dono do Card OU o Dono do Space podem editar!
+	if card.CreatedByID != playerID && space.OwnerID != playerID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão. Apenas o criador do card ou o dono da turma podem editar."})
+		return
+	}
+
+	database.DB.Model(&card).Updates(map[string]interface{}{
+		"title":        input.Title,
+		"category":     input.Category,
+		"sub_category": input.SubCategory,
+		"front":        input.Front,
+		"back":         input.Back,
+		"hint":         input.Hint,
+	})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Flashcard atualizado!"})
+}
+
+// ==========================================================
+// 🗑️ 4. APAGAR FLASHCARD (Regra de Permissão)
+// ==========================================================
+func DeleteFlashcard(c *gin.Context) {
+	spaceID := c.Param("space_id")
+	cardID := c.Param("card_id")
+	userIDInterface, _ := c.Get("userID")
+
+	var playerID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		playerID = v
+	case string:
+		playerID, _ = uuid.Parse(v)
+	}
+
+	var space models.Space
+	database.DB.Where("id = ?", spaceID).First(&space)
+
+	var card models.Flashcard
+	if err := database.DB.Where("id = ? AND space_id = ?", cardID, spaceID).First(&card).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Flashcard não encontrado."})
+		return
+	}
+
+	// 🚨 TRAVA DE SEGURANÇA: Só o Dono do Card OU o Dono do Space podem excluir!
+	if card.CreatedByID != playerID && space.OwnerID != playerID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão. Apenas o criador do card ou o dono da turma podem excluir."})
+		return
+	}
+
+	database.DB.Delete(&card)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Flashcard apagado da turma!"})
 }

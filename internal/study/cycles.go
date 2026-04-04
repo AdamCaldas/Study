@@ -526,6 +526,9 @@ type SuperEditCycleInput struct {
 		SuggestedMinutes int        `json:"suggested_minutes"`
 		Sequence         int        `json:"sequence"`
 		DayOfWeek        *int       `json:"day_of_week"`
+		// 👇 OS DOIS CAMPOS QUE FALTAVAM ESTÃO AQUI AGORA! 👇
+		Importance  int `json:"importance"`
+		Performance int `json:"performance"`
 	} `json:"blocks"`
 }
 
@@ -564,10 +567,7 @@ func UpdateFullCycle(c *gin.Context) {
 		updates["hours_per_day"] = *input.HoursPerDay
 	}
 	if input.StudyDays != nil {
-		// 1. Transforma o array []int em bytes JSON
 		studyDaysBytes, _ := json.Marshal(input.StudyDays)
-
-		// 2. Converte pra String e FORÇA o Postgres a aceitar como jsonb
 		updates["study_days"] = gorm.Expr("?::jsonb", string(studyDaysBytes))
 	}
 	if input.MinSessionMin != nil {
@@ -588,7 +588,7 @@ func UpdateFullCycle(c *gin.Context) {
 		}
 	}
 
-	// 👇 A MÁGICA INVISÍVEL AQUI: Salva os IDs velhos na memória antes de apagar!
+	// Salva os IDs velhos na memória antes de apagar!
 	var oldBlocks []models.StudyBlock
 	tx.Where("strategy_id = ?", strategy.ID).Find(&oldBlocks)
 
@@ -613,9 +613,12 @@ func UpdateFullCycle(c *gin.Context) {
 				SuggestedMinutes: b.SuggestedMinutes,
 				Sequence:         b.Sequence,
 				DayOfWeek:        b.DayOfWeek,
+				// 👇 SALVANDO OS DADOS NO BANCO AGORA! 👇
+				Importance:  b.Importance,
+				Performance: b.Performance,
 			}
 
-			// Tenta usar o ID que o Front mandou ou resgata o original da memória!
+			// Tenta usar o ID que o Front mandou ou resgata o original da memória
 			if b.ID != nil && *b.ID != uuid.Nil {
 				newBlock.ID = *b.ID
 			} else {
@@ -627,7 +630,7 @@ func UpdateFullCycle(c *gin.Context) {
 				}
 
 				if savedID, exists := oldIdMap[key]; exists {
-					newBlock.ID = savedID // O ID É PRESERVADO AQUI! O vínculo não quebra.
+					newBlock.ID = savedID
 				}
 			}
 

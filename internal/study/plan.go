@@ -532,6 +532,9 @@ type SuperEditPlanInput struct {
 		StartTime        *string    `json:"start_time"`
 		EndTime          *string    `json:"end_time"`
 		SuggestedMinutes int        `json:"suggested_minutes"`
+		// 👇 OS CAMPOS QUE FALTAVAM PARA SALVAR AS ESTRELINHAS 👇
+		Importance  int `json:"importance"`
+		Performance int `json:"performance"`
 	} `json:"blocks"`
 }
 
@@ -570,7 +573,6 @@ func UpdateFullPlan(c *gin.Context) {
 		updates["hours_per_day"] = *input.HoursPerDay
 	}
 	if input.StudyDays != nil {
-		// A MÁGICA DO POSTGRES AQUI TBM: Converte o Array e manda o banco forçar como JSONB
 		studyDaysBytes, _ := json.Marshal(input.StudyDays)
 		updates["study_days"] = gorm.Expr("?::jsonb", string(studyDaysBytes))
 	}
@@ -603,6 +605,9 @@ func UpdateFullPlan(c *gin.Context) {
 				StartTime:        b.StartTime,
 				EndTime:          b.EndTime,
 				SuggestedMinutes: b.SuggestedMinutes,
+				// 👇 SALVA OS VALORES DAS ESTRELINHAS DE FATO NO BANCO 👇
+				Importance:  b.Importance,
+				Performance: b.Performance,
 			}
 
 			// Se o Front mandou o ID, a gente reusa! Isso mantém os relatórios (Analytics) funcionando!

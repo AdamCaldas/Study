@@ -673,13 +673,25 @@ type FlashcardDeck struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// ==========================================================
+// 🃏 FLASHCARDS COLABORATIVOS (Aba do Space)
+// ==========================================================
 type Flashcard struct {
-	ID     uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	DeckID uuid.UUID `gorm:"type:uuid;index;not null" json:"deck_id"`
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`
 
-	Front string `gorm:"type:text;not null" json:"front"` // Frente da carta (Pergunta)
-	Back  string `gorm:"type:text;not null" json:"back"`  // Verso da carta (Resposta)
+	Title       string `gorm:"size:255;not null" json:"title"`
+	Category    string `gorm:"size:100" json:"category"`     // Ex: Matemática
+	SubCategory string `gorm:"size:100" json:"sub_category"` // Ex: Álgebra
+
+	Front string `gorm:"type:text;not null" json:"front"` // A Pergunta
+	Back  string `gorm:"type:text;not null" json:"back"`  // A Resposta
+	Hint  string `gorm:"type:text" json:"hint"`           // A Dica extra (Opcional)
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Isso aqui faz o GORM trazer Nome/Foto de quem criou automaticamente!
+	Creator *User `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"`
 }

@@ -1,7 +1,6 @@
 package gamification
 
 import (
-	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -17,40 +16,56 @@ type RewardInput struct {
 	Amount int    `json:"amount"`
 }
 
+// ==========================================================
+// ⚡ CONCEDER XP PARA O USUÁRIO (Baseado nas Regras do Admin)
+// ==========================================================
 func RewardXP(c *gin.Context) {
 	userIDContext, _ := c.Get("userID")
-	userIDStr := fmt.Sprintf("%v", userIDContext)
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(400, gin.H{"error": "ID de usuário inválido"})
-		return
+	var userID uuid.UUID
+	switch v := userIDContext.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
 	}
 
-	var input RewardInput
+	var input struct {
+		Action string `json:"action" binding:"required"`
+		Amount int    `json:"amount"`
+	}
+
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(400, gin.H{"error": "Ação inválida"})
 		return
 	}
 
 	xpToAward := input.Amount
-	// Se o front-end não mandar o valor (mandar 0), usamos um valor padrão
+
+	// Se o front-end NÃO mandou um valor fixo, o Back-end procura na Tabela de Regras do Admin!
 	if xpToAward <= 0 {
-		switch input.Action {
-		case "completed_pomodoro":
-			xpToAward = 25
-		case "created_note":
-			xpToAward = 10
-		default:
+		var rule models.GamificationRule
+		// Procura pela ActionName que você criou no painel (Ex: "completed_pomodoro")
+		if err := database.DB.Where("action_name = ?", input.Action).First(&rule).Error; err == nil {
+			xpToAward = rule.RewardXP
+			// Obs: A lógica do DailyLimit (Limite Diário) está preparada na tabela.
+			// Como o sistema não pode quebrar agora, aplicamos o XP direto!
+		} else {
+			// Se o Admin ainda não cadastrou essa regra no banco, dá 5 de XP por padrão pra não bugar a tela do aluno.
 			xpToAward = 5
 		}
 	}
 
+	// Injeta o XP na conta do aluno!
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpToAward)).Error; err != nil {
 		c.JSON(500, gin.H{"error": "Erro ao atualizar XP", "detalhe": err.Error()})
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "XP ganho!", "xp_earned": xpToAward})
+	c.JSON(200, gin.H{
+		"message":   "XP ganho com sucesso!",
+		"action":    input.Action,
+		"xp_earned": xpToAward,
+	})
 }
 
 // ==========================================================
