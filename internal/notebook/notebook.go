@@ -58,8 +58,9 @@ func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) 
 // 1️⃣ CREATE NOTEBOOK
 // ==========================================================
 type CreateNotebookInput struct {
-	Name     string `json:"name" binding:"required"`
-	ColorHex string `json:"color_hex"`
+	Name       string `json:"name" binding:"required"`
+	ColorHex   string `json:"color_hex"`
+	Visibility string `json:"visibility"` // 👈 Adicionado para salvar Público/Privado
 }
 
 func CreateNotebook(c *gin.Context) {
@@ -88,13 +89,18 @@ func CreateNotebook(c *gin.Context) {
 	if input.ColorHex == "" {
 		input.ColorHex = "#E0E0E0"
 	}
+	// Se não enviar visibilidade, o padrão é público
+	if input.Visibility == "" {
+		input.Visibility = "public"
+	}
 
 	newNotebook := models.Notebook{
 		SpaceID:     parsedSpaceID,
 		Name:        input.Name,
 		ColorHex:    input.ColorHex,
-		CreatedByID: parsedUserID, // ASSINATURA
-		UpdatedByID: parsedUserID, // ASSINATURA
+		Visibility:  input.Visibility, // 👈 Salva no banco
+		CreatedByID: parsedUserID,     // ASSINATURA
+		UpdatedByID: parsedUserID,     // ASSINATURA
 	}
 
 	if err := database.DB.Create(&newNotebook).Error; err != nil {
@@ -109,8 +115,9 @@ func CreateNotebook(c *gin.Context) {
 // 2️⃣ UPDATE NOTEBOOK
 // ==========================================================
 type UpdateNotebookInput struct {
-	Name     string `json:"name"`
-	ColorHex string `json:"color_hex"`
+	Name       string `json:"name"`
+	ColorHex   string `json:"color_hex"`
+	Visibility string `json:"visibility"` // 👈 Adicionado para edição
 }
 
 func UpdateNotebook(c *gin.Context) {
@@ -138,7 +145,8 @@ func UpdateNotebook(c *gin.Context) {
 	if err := database.DB.Model(&notebook).Updates(map[string]interface{}{
 		"name":          input.Name,
 		"color_hex":     input.ColorHex,
-		"updated_by_id": parsedUserID, // ASSINATURA
+		"visibility":    input.Visibility, // 👈 Atualiza no banco
+		"updated_by_id": parsedUserID,     // ASSINATURA
 	}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar"})
 		return
@@ -170,17 +178,20 @@ func ListNotebooks(c *gin.Context) {
 }
 
 // ==========================================================
-// 📚 3. GET /spaces/:space_id/notebooks (Aba de Cadernos)
-// ==========================================================
-// ==========================================================
 // 📚 3. GET /spaces/:space_id/notebooks (SÓ AS CAPAS DOS CADERNOS)
 // ==========================================================
 func ListSpaceNotebooks(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
 	var notebooks []models.Notebook
-	// 🚨 Tiramos os Preloads pesados daqui! O BD só vai buscar as capas (metadata).
-	database.DB.Where("space_id = ?", spaceID).Find(&notebooks)
+
+	// 👇 A MÁGICA AQUI: O banco faz um JOIN com a tabela de usuários para puxar o nome do criador e do editor!
+	database.DB.
+		Select("notebooks.*, criador.full_name as owner_name, editor.full_name as updater_name").
+		Joins("LEFT JOIN users criador ON notebooks.created_by_id = criador.id").
+		Joins("LEFT JOIN users editor ON notebooks.updated_by_id = editor.id").
+		Where("notebooks.space_id = ?", spaceID).
+		Find(&notebooks)
 
 	now := time.Now()
 	for i := range notebooks {

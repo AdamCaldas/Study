@@ -110,10 +110,11 @@ type NotebookPermission struct {
 
 // NOTEBOOK
 type Notebook struct {
-	ID       uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID  uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
-	Name     string    `gorm:"size:100;not null" json:"name"`
-	ColorHex string    `gorm:"size:7" json:"color_hex"`
+	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID    uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
+	Name       string    `gorm:"size:100;not null" json:"name"`
+	ColorHex   string    `gorm:"size:7" json:"color_hex"`
+	Visibility string    `gorm:"default:'public'" json:"visibility"`
 
 	UnlockAt *time.Time `json:"unlock_at"`
 	IsLocked bool       `gorm:"-" json:"is_locked"`
@@ -649,25 +650,6 @@ type ArenaMatch struct {
 	OpponentTime    *int `json:"opponent_time"`
 
 	WinnerID *uuid.UUID `gorm:"type:uuid" json:"winner_id"` // O grande campeão
-
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// ==========================================================
-// 🃏 FLASHCARDS (Baralhos e Cartas)
-// ==========================================================
-type FlashcardDeck struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
-	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`
-
-	Title       string `gorm:"size:255;not null" json:"title"`
-	Description string `gorm:"type:text" json:"description"`
-	Category    string `gorm:"size:100" json:"category"`     // Ex: Matemática
-	SubCategory string `gorm:"size:100" json:"sub_category"` // Ex: Álgebra
-
-	Cards []Flashcard `gorm:"foreignKey:DeckID;constraint:OnDelete:CASCADE;" json:"cards"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
