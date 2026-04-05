@@ -59,6 +59,7 @@ func main() {
 	router.POST("/v1/login", auth.Login)
 	router.POST("/v1/forgot-password", auth.ForgotPassword)
 	router.POST("/v1/reset-password", auth.ResetPassword)
+	router.POST("/v1/auth/google", auth.GoogleAuth)
 
 	// ==========================================================
 	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO (Requer JWT)

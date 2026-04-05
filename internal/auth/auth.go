@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"time"
@@ -14,10 +16,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 )
 
 // ==========================================================
-// 1. REGISTRAR USUÁRIO (Cadastro Direto - Sem Validação)
+// 1. REGISTRAR USUÁRIO (Agora enviando e-mail de verdade!)
 // ==========================================================
 type RegisterInput struct {
 	FullName string `json:"full_name" binding:"required"`
@@ -46,34 +49,71 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// 🔓 MUDANÇA AQUI: IsEmailVerified agora é TRUE por padrão
+	// 🔒 Volta a ser FALSE, ele precisa verificar o e-mail agora
 	newUser := models.User{
 		FullName:        input.FullName,
 		Email:           input.Email,
 		CPF:             input.CPF,
 		Password:        string(hashedPassword),
-		IsEmailVerified: true,
+		IsEmailVerified: false,
 	}
 	database.DB.Create(&newUser)
 
-	// OTP e Envio de E-mail removidos temporariamente para agilizar o teste
+	// 🎲 Gera código de 6 dígitos
+	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+
+	// Salva no banco de dados com validade de 10 minutos
+	verificationCode := models.VerificationCode{
+		Email:     newUser.Email,
+		Code:      code,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	}
+	database.DB.Create(&verificationCode)
+
+	// 📧 Dispara o e-mail (usando seu utils que já tá pronto!)
+	go utils.SendVerificationEmail(newUser.Email, newUser.FullName, code)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Conta criada com sucesso! Você já pode fazer login.",
+		"message": "Conta criada! Verifique seu e-mail para ativar a conta.",
 		"email":   newUser.Email,
 	})
 }
 
 // ==========================================================
-// 2. VALIDAR CÓDIGO (Desativado/Mantido para compatibilidade)
+// 2. VALIDAR CÓDIGO DE E-MAIL
 // ==========================================================
 func VerifyEmailCode(c *gin.Context) {
-	// Como você desativou no back, este endpoint apenas retorna sucesso se chamado
-	c.JSON(http.StatusOK, gin.H{"message": "E-mail já está verificado no sistema."})
+	var input struct {
+		Email string `json:"email" binding:"required,email"`
+		Code  string `json:"code" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "E-mail e código são obrigatórios."})
+		return
+	}
+
+	var verification models.VerificationCode
+	if err := database.DB.Where("email = ? AND code = ?", input.Email, input.Code).First(&verification).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Código inválido ou incorreto."})
+		return
+	}
+
+	if time.Now().After(verification.ExpiresAt) {
+		database.DB.Delete(&verification)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Este código expirou. Solicite um novo."})
+		return
+	}
+
+	// 🔓 Ativa a conta do usuário
+	database.DB.Model(&models.User{}).Where("email = ?", input.Email).Update("is_email_verified", true)
+	database.DB.Delete(&verification) // Limpa o código usado
+
+	c.JSON(http.StatusOK, gin.H{"message": "E-mail verificado com sucesso! Você já pode fazer login."})
 }
 
 // ==========================================================
-// 3. LOGIN (Sem trava de E-mail)
+// 3. LOGIN (Com trava de E-mail religada)
 // ==========================================================
 type LoginInput struct {
 	Email    string `json:"email" binding:"required,email"`
@@ -101,13 +141,11 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	// 🔓 MUDANÇA AQUI: Trava de verificação comentada
-	/*
-		if !user.IsEmailVerified {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Sua conta ainda não foi verificada."})
-			return
-		}
-	*/
+	// 🔒 Religa a Trava de Verificação
+	if !user.IsEmailVerified {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Sua conta ainda não foi verificada. Cheque seu e-mail."})
+		return
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.ID,
@@ -203,4 +241,78 @@ func ResetPassword(c *gin.Context) {
 	database.DB.Delete(&reset)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Senha alterada com sucesso!"})
+}
+
+// ==========================================================
+// 6. 🌐 LOGIN/CADASTRO COM GOOGLE (O Passo 2)
+// ==========================================================
+type GoogleLoginInput struct {
+	Token string `json:"token" binding:"required"`
+}
+
+func GoogleAuth(c *gin.Context) {
+	var input GoogleLoginInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Token do Google é obrigatório."})
+		return
+	}
+
+	// 1. Valida o Token direto com os servidores do Google (Segurança Máxima)
+	payload, err := idtoken.Validate(context.Background(), input.Token, "")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token do Google inválido ou expirado."})
+		return
+	}
+
+	// 2. Extrai os dados que o Google devolveu
+	email := payload.Claims["email"].(string)
+	name := payload.Claims["name"].(string)
+	picture := ""
+	if pic, ok := payload.Claims["picture"]; ok {
+		picture = pic.(string)
+	}
+
+	// 3. Procura no banco de dados se esse usuário já existe
+	var user models.User
+	if err := database.DB.Where("email = ?", email).First(&user).Error; err != nil {
+		// 🚨 USUÁRIO NÃO EXISTE: Vamos cadastrar ele automaticamente!
+
+		// Gera uma senha aleatória absurda só pro banco não reclamar
+		randomPassword, _ := bcrypt.GenerateFromPassword([]byte(uuid.New().String()), bcrypt.DefaultCost)
+
+		user = models.User{
+			FullName:        name,
+			Email:           email,
+			ProfilePic:      picture,
+			Password:        string(randomPassword),
+			IsEmailVerified: true,                                // Já vem verificado pelo Google!
+			CPF:             "GOOGLE-" + uuid.New().String()[:4], // Temporário pra não quebrar a regra de CPF único
+		}
+
+		if err := database.DB.Create(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar conta via Google."})
+			return
+		}
+	}
+
+	// 4. Usuário logado/criado! Vamos gerar o Token JWT do StudFy
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": user.ID,
+		"exp": time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	secret := os.Getenv("JWT_SECRET")
+	tokenString, _ := token.SignedString([]byte(secret))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Login com Google realizado com sucesso!",
+		"token":   tokenString,
+		"user": gin.H{
+			"id":                user.ID,
+			"full_name":         user.FullName,
+			"profile_picture":   user.ProfilePic,
+			"subscription_type": user.SubscriptionType,
+			"account_type":      user.AccountType,
+		},
+	})
 }
