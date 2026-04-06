@@ -79,7 +79,7 @@ func main() {
 		protected.GET("/me/dashboard", study.GetPersonalDashboard)
 
 		// 👉 Rotas de Configuração do Usuário
-		protected.PUT("/availability/:availability_id", study.UpdateAvailabilityProfile)
+		protected.PUT("/availability/:availability_id", users.UpdateAvailabilityProfile)
 
 		// 👉 Repositório Global do Professor (Questões Privadas)
 		protected.GET("/me/question-bank", study.GetMyQuestionBank)
@@ -166,6 +166,7 @@ func main() {
 			// 👉 MOTOR DO CRONOGRAMA (FIXED)
 			// =======================================================
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
+			spaceRoutes.POST("/plans/auto-fit", study.AutoFitPlanBlocks) // 👈 A ROTA NOVA ESTÁ AQUI
 			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PATCH("/plans/execute", study.ExecutePlanBlock)
 			spaceRoutes.PUT("/plans/full-update", study.UpdateFullPlan)
@@ -180,7 +181,7 @@ func main() {
 			spaceRoutes.POST("/cycles/auto-generate", study.GenerateAutoCycle)
 			spaceRoutes.GET("/cycles", study.ListCycles)
 			spaceRoutes.PATCH("/cycles/advance", study.AdvanceCycleStep)
-			spaceRoutes.PUT("/cycles/full-update", study.UpdateFullCycle) // 👈 Agora agrupado no lugar certo!
+			spaceRoutes.PUT("/cycles/full-update", study.UpdateFullCycle)
 			spaceRoutes.POST("/cycles/blocks", study.CreateCycleBlock)
 			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
 			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)

@@ -27,16 +27,6 @@ type DisciplineInput struct {
 	DayOfWeek   *int       `json:"day_of_week"`
 }
 
-type DailyScheduleInput struct {
-	DayOfWeek  int    `json:"day_of_week"`
-	WakeUpTime string `json:"wake_up_time"`
-	SleepTime  string `json:"sleep_time"`
-	WorkStart  string `json:"work_start"`
-	WorkEnd    string `json:"work_end"`
-	LunchStart string `json:"lunch_start"`
-	LunchEnd   string `json:"lunch_end"`
-}
-
 type GenerateStrategyInput struct {
 	Mode               string            `json:"mode" binding:"required"`
 	Source             string            `json:"source"`
@@ -56,6 +46,35 @@ type CreatePlanBlockInput struct {
 	EndTime    *string    `json:"end_time"`
 	Activity   string     `json:"activity" binding:"required"`
 	NotebookID *uuid.UUID `json:"notebook_id"`
+}
+
+type DailyScheduleInput struct {
+	DayOfWeek  int    `json:"day_of_week"`
+	WakeUpTime string `json:"wake_up_time"`
+	SleepTime  string `json:"sleep_time"`
+	WorkStart  string `json:"work_start"`
+	WorkEnd    string `json:"work_end"`
+	LunchStart string `json:"lunch_start"`
+	LunchEnd   string `json:"lunch_end"`
+}
+
+type SuperEditPlanInput struct {
+	TargetGoal    *string  `json:"target_goal"`
+	HoursPerDay   *float64 `json:"hours_per_day"`
+	StudyDays     []int    `json:"study_days"`
+	MinSessionMin *int     `json:"min_session_minutes"`
+	MaxSessionMin *int     `json:"max_session_minutes"`
+	Blocks        []struct {
+		ID               *uuid.UUID `json:"id"`
+		Activity         string     `json:"activity"`
+		NotebookID       *uuid.UUID `json:"notebook_id"`
+		DayOfWeek        *int       `json:"day_of_week"`
+		StartTime        *string    `json:"start_time"`
+		EndTime          *string    `json:"end_time"`
+		SuggestedMinutes int        `json:"suggested_minutes"`
+		Importance       int        `json:"importance"`
+		Performance      int        `json:"performance"`
+	} `json:"blocks"`
 }
 
 // ==========================================================
@@ -237,7 +256,7 @@ func GenerateAutoPlan(c *gin.Context) {
 	strategy.Source = input.Source
 	strategy.TargetGoal = input.TargetGoal
 	strategy.HoursPerDay = input.HoursPerDay
-	strategy.StudyDays = input.StudyDays // 👈 Salva nativamente
+	strategy.StudyDays = input.StudyDays
 	strategy.FreeTimePreference = input.FreeTimePreference
 	strategy.MinSessionMin = input.MinSessionMin
 	strategy.MaxSessionMin = input.MaxSessionMin
@@ -259,14 +278,12 @@ func GenerateAutoPlan(c *gin.Context) {
 	}
 	breakLength := 10
 
-	// 👇 FILTRO MÁGICO: Garante que vai gerar blocos apenas pros dias selecionados!
 	studyDaysMap := make(map[int]bool)
 	for _, d := range input.StudyDays {
 		studyDaysMap[d] = true
 	}
 
 	for _, dayConfig := range dailyAvailability {
-		// Ignora dias da rotina que o aluno NÃO quer estudar
 		if len(studyDaysMap) > 0 && !studyDaysMap[dayConfig.DayOfWeek] {
 			continue
 		}
@@ -375,7 +392,7 @@ func GenerateAutoPlan(c *gin.Context) {
 }
 
 // ==========================================================
-// 📋 2. LISTAR CRONOGRAMA (Com Algoritmo de Recálculo Dinâmico)
+// 📋 2. LISTAR CRONOGRAMA (Com Blocos Visuais e Clonagem Inteligente)
 // ==========================================================
 func ListPlans(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -395,6 +412,9 @@ func ListPlans(c *gin.Context) {
 		return db.Order("day_of_week ASC, start_time ASC")
 	}).Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
 
+		// ==========================================================
+		// 🧬 LÓGICA DE CLONAR DO DONO (INTELIGENTE)
+		// ==========================================================
 		var space models.Space
 		if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err == nil {
 			var ownerStrategy models.StudyStrategy
@@ -402,33 +422,65 @@ func ListPlans(c *gin.Context) {
 				return db.Order("day_of_week ASC, start_time ASC")
 			}).Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, space.OwnerID).First(&ownerStrategy).Error; err == nil && space.OwnerID != parsedUserID {
 
+				// 1. Cria a "Fôrma" nova pro aluno
 				newStrategy := ownerStrategy
 				newStrategy.ID = uuid.New()
 				newStrategy.CreatedByID = parsedUserID
 				database.DB.Create(&newStrategy)
 
+				// 2. Olha se esse aluno tem uma Rotina de Vida salva
+				var userRoutine models.AvailabilityProfile
+				database.DB.Where("user_id = ? AND is_default = ?", parsedUserID, true).First(&userRoutine)
+				if userRoutine.ID == uuid.Nil {
+					database.DB.Where("user_id = ?", parsedUserID).First(&userRoutine)
+				}
+
+				hasRoutine := userRoutine.ID != uuid.Nil && userRoutine.Schedule != ""
+
+				// 3. Clona os blocos do professor um por um
 				var newBlocks []models.StudyBlock
 				for _, b := range ownerStrategy.Blocks {
 					newBlock := b
 					newBlock.ID = uuid.New()
 					newBlock.StrategyID = newStrategy.ID
+
+					if hasRoutine {
+						newBlock.StartTime = nil
+						newBlock.EndTime = nil
+					}
+
 					newBlocks = append(newBlocks, newBlock)
 				}
+
 				if len(newBlocks) > 0 {
 					database.DB.Create(&newBlocks)
 				}
 				newStrategy.Blocks = newBlocks
 				strategy = newStrategy
+
+				if hasRoutine {
+					c.JSON(http.StatusOK, gin.H{
+						"message":               "Cronograma clonado! Os horários foram zerados para respeitar sua rotina. Clique em 'Gerar Automático'.",
+						"needs_auto_generation": true,
+						"study_strategy":        strategy,
+						"routine_blocks":        []map[string]interface{}{},
+					})
+					return
+				}
+
 			} else {
-				c.JSON(200, gin.H{"message": "Nenhum cronograma configurado ainda", "study_strategy": nil})
+				c.JSON(http.StatusOK, gin.H{"message": "Nenhum cronograma configurado ainda", "study_strategy": nil})
 				return
 			}
 		} else {
-			c.JSON(200, gin.H{"message": "Nenhum cronograma configurado ainda", "study_strategy": nil})
+			c.JSON(http.StatusOK, gin.H{"message": "Nenhum cronograma configurado ainda", "study_strategy": nil})
 			return
 		}
 	}
 
+	// ==========================================================
+	// 📊 LÓGICA DE ANALYTICS (HOJE)
+	// ==========================================================
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	intToday := int(now.Weekday())
@@ -467,11 +519,9 @@ func ListPlans(c *gin.Context) {
 		if executed {
 			realEndMin := timeToMinutes(logData.RealEndTime)
 			lastEndTime = realEndMin
-
 			if realEndMin > plannedEndMin {
 				shiftMinutes = realEndMin - plannedEndMin
 			}
-
 			todayAnalyticsBlocks = append(todayAnalyticsBlocks, map[string]interface{}{
 				"block_id":           b.ID,
 				"activity":           b.Activity,
@@ -486,9 +536,6 @@ func ListPlans(c *gin.Context) {
 			adjustedStartMin := plannedStartMin + shiftMinutes
 			adjustedEndMin := plannedEndMin + shiftMinutes
 			lastEndTime = adjustedEndMin
-
-			hasRecalc := shiftMinutes > 0
-
 			todayAnalyticsBlocks = append(todayAnalyticsBlocks, map[string]interface{}{
 				"block_id":            b.ID,
 				"activity":            b.Activity,
@@ -497,47 +544,80 @@ func ListPlans(c *gin.Context) {
 				"adjusted_start_time": minutesToTime(adjustedStartMin),
 				"adjusted_end_time":   minutesToTime(adjustedEndMin),
 				"total_minutes":       0,
-				"has_recalculation":   hasRecalc,
+				"has_recalculation":   shiftMinutes > 0,
 			})
 		}
 	}
-
 	if todayAnalyticsBlocks == nil {
 		todayAnalyticsBlocks = []map[string]interface{}{}
 	}
 
-	c.JSON(200, gin.H{
+	// ==========================================================
+	// 🧙‍♂️ A NOVA MÁGICA: INJETAR OS BLOCOS DA ROTINA (FANTASMAS)
+	// ==========================================================
+	var routineBlocks []map[string]interface{}
+	var defaultProfile models.AvailabilityProfile
+
+	database.DB.Where("user_id = ? AND is_default = ?", parsedUserID, true).First(&defaultProfile)
+	if defaultProfile.ID == uuid.Nil {
+		database.DB.Where("user_id = ?", parsedUserID).First(&defaultProfile)
+	}
+
+	if defaultProfile.ID != uuid.Nil && defaultProfile.Schedule != "" {
+		var dailyAvailability []DailyScheduleInput
+		if err := json.Unmarshal([]byte(defaultProfile.Schedule), &dailyAvailability); err == nil {
+
+			for _, day := range dailyAvailability {
+				if day.SleepTime != "" && day.WakeUpTime != "" {
+					routineBlocks = append(routineBlocks, map[string]interface{}{
+						"activity":    "Dormir",
+						"day_of_week": day.DayOfWeek,
+						"start_time":  day.SleepTime,
+						"end_time":    day.WakeUpTime,
+						"type":        "sleep",
+						"color_hex":   "#4B5563",
+					})
+				}
+				if day.WorkStart != "" && day.WorkEnd != "" {
+					routineBlocks = append(routineBlocks, map[string]interface{}{
+						"activity":    "Compromisso Fixo",
+						"day_of_week": day.DayOfWeek,
+						"start_time":  day.WorkStart,
+						"end_time":    day.WorkEnd,
+						"type":        "work",
+						"color_hex":   "#EF4444",
+					})
+				}
+				if day.LunchStart != "" && day.LunchEnd != "" {
+					routineBlocks = append(routineBlocks, map[string]interface{}{
+						"activity":    "Almoço/Pausa",
+						"day_of_week": day.DayOfWeek,
+						"start_time":  day.LunchStart,
+						"end_time":    day.LunchEnd,
+						"type":        "lunch",
+						"color_hex":   "#F59E0B",
+					})
+				}
+			}
+		}
+	}
+	if routineBlocks == nil {
+		routineBlocks = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
 		"analytics": gin.H{
 			"today_minutes": todayLog.TotalMinutes,
 			"today_blocks":  todayAnalyticsBlocks,
 		},
 		"study_strategy": strategy,
+		"routine_blocks": routineBlocks,
 	})
 }
 
 // ==========================================================
-// 🛠️ 3. SUPER ROTA DE EDIÇÃO TOTAL DO CRONOGRAMA (A NOVA MÁGICA!)
+// 🛠️ 3. SUPER ROTA DE EDIÇÃO TOTAL DO CRONOGRAMA
 // ==========================================================
-type SuperEditPlanInput struct {
-	TargetGoal    *string  `json:"target_goal"`
-	HoursPerDay   *float64 `json:"hours_per_day"`
-	StudyDays     []int    `json:"study_days"`
-	MinSessionMin *int     `json:"min_session_minutes"`
-	MaxSessionMin *int     `json:"max_session_minutes"`
-	Blocks        []struct {
-		ID               *uuid.UUID `json:"id"`
-		Activity         string     `json:"activity"`
-		NotebookID       *uuid.UUID `json:"notebook_id"`
-		DayOfWeek        *int       `json:"day_of_week"`
-		StartTime        *string    `json:"start_time"`
-		EndTime          *string    `json:"end_time"`
-		SuggestedMinutes int        `json:"suggested_minutes"`
-		// 👇 OS CAMPOS QUE FALTAVAM PARA SALVAR AS ESTRELINHAS 👇
-		Importance  int `json:"importance"`
-		Performance int `json:"performance"`
-	} `json:"blocks"`
-}
-
 func UpdateFullPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 
@@ -592,7 +672,6 @@ func UpdateFullPlan(c *gin.Context) {
 	}
 
 	if len(input.Blocks) > 0 {
-		// Apaga os velhos, mas PRESERVA os IDs na hora de recriar!
 		tx.Where("strategy_id = ?", strategy.ID).Delete(&models.StudyBlock{})
 
 		var newBlocks []models.StudyBlock
@@ -605,16 +684,14 @@ func UpdateFullPlan(c *gin.Context) {
 				StartTime:        b.StartTime,
 				EndTime:          b.EndTime,
 				SuggestedMinutes: b.SuggestedMinutes,
-				// 👇 SALVA OS VALORES DAS ESTRELINHAS DE FATO NO BANCO 👇
-				Importance:  b.Importance,
-				Performance: b.Performance,
+				Importance:       b.Importance,
+				Performance:      b.Performance,
 			}
 
-			// Se o Front mandou o ID, a gente reusa! Isso mantém os relatórios (Analytics) funcionando!
 			if b.ID != nil && *b.ID != uuid.Nil {
 				newBlock.ID = *b.ID
 			} else {
-				newBlock.ID = uuid.New() // Se for um bloco novo, cria ID novo.
+				newBlock.ID = uuid.New()
 			}
 
 			newBlocks = append(newBlocks, newBlock)
@@ -895,10 +972,12 @@ func GetMyStudyAnalytics(c *gin.Context) {
 }
 
 // ==========================================================
-// ⏰ ATUALIZAR ROTINA DO ALUNO (Disponibilidade de Horário)
+// 🤖 6. AUTOFIT - ENCAIXE INTELIGENTE DOS BLOCOS CLONADOS
 // ==========================================================
-func UpdateAvailabilityProfile(c *gin.Context) {
-	profileID := c.Param("availability_id")
+// 👇 RENOMEADO DE "GenerateAutoPlan" PARA "AutoFitPlanBlocks" PARA NÃO DAR ERRO 👇
+func AutoFitPlanBlocks(c *gin.Context) {
+	spaceIDStr := c.Param("space_id")
+	spaceID, _ := uuid.Parse(spaceIDStr)
 
 	userIDInterface, _ := c.Get("userID")
 	var parsedUserID uuid.UUID
@@ -909,24 +988,88 @@ func UpdateAvailabilityProfile(c *gin.Context) {
 		parsedUserID, _ = uuid.Parse(v)
 	}
 
-	var input struct {
-		Schedule []DailyScheduleInput `json:"schedule" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de rotina inválido."})
+	var strategy models.StudyStrategy
+	if err := database.DB.Preload("Blocks").Where("space_id = ? AND created_by_id = ?", spaceID, parsedUserID).First(&strategy).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cronograma não encontrado para este usuário."})
 		return
 	}
 
-	scheduleJSON, _ := json.Marshal(input.Schedule)
-
-	if err := database.DB.Model(&models.AvailabilityProfile{}).
-		Where("id = ? AND user_id = ?", profileID, parsedUserID).
-		Update("schedule", string(scheduleJSON)).Error; err != nil {
-
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a rotina."})
-		return
+	var userRoutine models.AvailabilityProfile
+	database.DB.Where("user_id = ? AND is_default = ?", parsedUserID, true).First(&userRoutine)
+	if userRoutine.ID == uuid.Nil {
+		database.DB.Where("user_id = ?", parsedUserID).First(&userRoutine)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Sua rotina foi atualizada com sucesso! Você já pode gerar um novo cronograma."})
+	routineMap := make(map[int]DailyScheduleInput)
+	if userRoutine.ID != uuid.Nil && userRoutine.Schedule != "" {
+		var dailyAvailability []DailyScheduleInput
+		if err := json.Unmarshal([]byte(userRoutine.Schedule), &dailyAvailability); err == nil {
+			for _, day := range dailyAvailability {
+				routineMap[day.DayOfWeek] = day
+			}
+		}
+	}
+
+	blocksByDay := make(map[int][]models.StudyBlock)
+	for _, b := range strategy.Blocks {
+		if b.DayOfWeek != nil {
+			blocksByDay[*b.DayOfWeek] = append(blocksByDay[*b.DayOfWeek], b)
+		}
+	}
+
+	for day, blocks := range blocksByDay {
+		routine, hasRoutine := routineMap[day]
+
+		var currentCursorMin int
+
+		if hasRoutine && routine.WakeUpTime != "" {
+			currentCursorMin = timeToMinutes(routine.WakeUpTime) + 30
+		} else {
+			currentCursorMin = 8 * 60
+		}
+
+		for _, block := range blocks {
+			if block.StartTime != nil && block.EndTime != nil {
+				endMin := timeToMinutes(*block.EndTime)
+				if endMin > currentCursorMin {
+					currentCursorMin = endMin
+				}
+				continue
+			}
+
+			duration := 60
+
+			if hasRoutine {
+				if routine.WorkStart != "" && routine.WorkEnd != "" {
+					workStartMin := timeToMinutes(routine.WorkStart)
+					workEndMin := timeToMinutes(routine.WorkEnd)
+					if currentCursorMin+duration > workStartMin && currentCursorMin < workEndMin {
+						currentCursorMin = workEndMin + 30
+					}
+				}
+
+				if routine.LunchStart != "" && routine.LunchEnd != "" {
+					lunchStartMin := timeToMinutes(routine.LunchStart)
+					lunchEndMin := timeToMinutes(routine.LunchEnd)
+					if currentCursorMin+duration > lunchStartMin && currentCursorMin < lunchEndMin {
+						currentCursorMin = lunchEndMin + 30
+					}
+				}
+			}
+
+			startStr := minutesToTime(currentCursorMin)
+			endStr := minutesToTime(currentCursorMin + duration)
+
+			database.DB.Model(&models.StudyBlock{}).Where("id = ?", block.ID).Updates(map[string]interface{}{
+				"start_time": startStr,
+				"end_time":   endStr,
+			})
+
+			currentCursorMin += duration + 15
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Cronograma otimizado com sucesso com base na sua rotina!",
+	})
 }

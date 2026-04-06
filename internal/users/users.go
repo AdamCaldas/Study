@@ -521,3 +521,66 @@ func SaveAvailabilityProfile(c *gin.Context) {
 		"profile": profile,
 	})
 }
+
+// ==========================================================
+// ⏰ EDITAR ROTINA GLOBAL (A FUNÇÃO QUE FALTAVA! 🚀)
+// ==========================================================
+func UpdateAvailabilityProfile(c *gin.Context) {
+	userIDInterface, _ := c.Get("userID")
+
+	var userID uuid.UUID
+	switch v := userIDInterface.(type) {
+	case uuid.UUID:
+		userID = v
+	case string:
+		userID, _ = uuid.Parse(v)
+	}
+
+	profileID := c.Param("availability_id")
+
+	var input struct {
+		Name      string `json:"name"`
+		Schedule  any    `json:"schedule"` // Aceita o Array de dias modificado
+		IsDefault *bool  `json:"is_default"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	// 1. Verifica se a rotina existe e pertence ao aluno
+	var profile models.AvailabilityProfile
+	if err := database.DB.Where("id = ? AND user_id = ?", profileID, userID).First(&profile).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Rotina não encontrada."})
+		return
+	}
+
+	updates := map[string]interface{}{}
+
+	if input.Name != "" {
+		updates["name"] = input.Name
+	}
+	if input.Schedule != nil {
+		scheduleJSON, _ := json.Marshal(input.Schedule)
+		updates["schedule"] = string(scheduleJSON)
+	}
+	if input.IsDefault != nil {
+		updates["is_default"] = *input.IsDefault
+
+		// Se ele marcou essa como Padrão, temos que tirar o Padrão de todas as outras dele
+		if *input.IsDefault {
+			database.DB.Model(&models.AvailabilityProfile{}).
+				Where("user_id = ? AND id != ?", userID, profileID).
+				Update("is_default", false)
+		}
+	}
+
+	// 2. Salva as edições no banco
+	if err := database.DB.Model(&profile).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar rotina."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Rotina atualizada com sucesso!"})
+}
