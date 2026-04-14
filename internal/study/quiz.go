@@ -3,9 +3,10 @@ package study
 import (
 	"encoding/json"
 	"net/http"
+	"time"
+
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,7 +26,9 @@ type CreateQuizInput struct {
 	} `json:"questions"`
 }
 
-// CreateQuiz - Cria o simulado e as perguntas
+// ==========================================================
+// 📝 CRIAR SIMULADO E PERGUNTAS
+// ==========================================================
 func CreateQuiz(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	var input CreateQuizInput
@@ -69,86 +72,30 @@ func CreateQuiz(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "Simulado criado com sucesso!", "quiz": newQuiz})
 }
 
-// ListQuizzes - Lista os simulados do Space para o aluno responder
-func ListQuizzes(c *gin.Context) {
+// ==========================================================
+// 📋 LISTAR SIMULADOS DA TURMA
+// ==========================================================
+func ListSpaceQuizzes(c *gin.Context) {
 	spaceID := c.Param("space_id")
-	var quizzes []models.Quiz
 
-	// O Preload("Questions") já traz as perguntas embutidas no JSON!
-	if err := database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar simulados"})
-		return
+	var quizzes []models.Quiz
+	// O Preload traz as perguntas embutidas no JSON
+	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
+
+	now := time.Now()
+	for i := range quizzes {
+		// Regra de Trava de Tempo (Simulados agendados)
+		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
+			quizzes[i].IsLocked = true
+			quizzes[i].Questions = []models.QuizQuestion{} // Esconde as perguntas até a data!
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
 }
 
 // ==========================================================
-// 🏦 SALVAR QUESTÃO NO BANCO GLOBAL (Fase 3)
-// ==========================================================
-func SaveToQuestionBank(c *gin.Context) {
-	teacherIDInterface, _ := c.Get("userID")
-	var teacherID uuid.UUID
-	switch v := teacherIDInterface.(type) {
-	case uuid.UUID:
-		teacherID = v
-	case string:
-		teacherID, _ = uuid.Parse(v)
-	}
-
-	var teacher models.User
-	if err := database.DB.Where("id = ? AND account_type = 'TEACHER'", teacherID).First(&teacher).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Apenas professores podem ter um Banco de Questões."})
-		return
-	}
-
-	var input models.QuestionBankItem
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados da questão inválidos."})
-		return
-	}
-
-	input.TeacherID = teacherID
-
-	if err := database.DB.Create(&input).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar no Banco de Questões."})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message":  "Questão salva no seu Banco Global!",
-		"question": input,
-	})
-}
-
-// ==========================================================
-// 🏦 LISTAR BANCO DE QUESTÕES DO PROFESSOR (Fase 3)
-// ==========================================================
-func GetMyQuestionBank(c *gin.Context) {
-	teacherIDInterface, _ := c.Get("userID")
-	var teacherID uuid.UUID
-	switch v := teacherIDInterface.(type) {
-	case uuid.UUID:
-		teacherID = v
-	case string:
-		teacherID, _ = uuid.Parse(v)
-	}
-
-	var questions []models.QuestionBankItem
-	if err := database.DB.Where("teacher_id = ?", teacherID).Order("created_at desc").Find(&questions).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar banco de questões."})
-		return
-	}
-
-	if questions == nil {
-		questions = []models.QuestionBankItem{}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
-}
-
-// ==========================================================
-// ⚔️ FASE 4: SUBMETER PROVA E CORREÇÃO AUTOMÁTICA
+// ⚔️ SUBMETER PROVA E CORREÇÃO AUTOMÁTICA
 // ==========================================================
 func SubmitQuiz(c *gin.Context) {
 	quizID := c.Param("quiz_id")
@@ -178,6 +125,7 @@ func SubmitQuiz(c *gin.Context) {
 	var totalScore float64 = 0
 	hasOpenEnded := false
 
+	// Motor de Correção
 	for _, question := range quiz.Questions {
 		studentAnswer, answered := input.Answers[question.ID.String()]
 
@@ -185,14 +133,14 @@ func SubmitQuiz(c *gin.Context) {
 			if answered && studentAnswer == question.CorrectAnswer {
 				totalScore += float64(question.Points)
 			}
-		} else if question.QuestionType == "open_ended" {
+		} else if question.QuestionType == "open_ended" || question.QuestionType == "flashcard_generated" {
 			hasOpenEnded = true
 		}
 	}
 
 	status := "completed"
 	if hasOpenEnded {
-		status = "pending_review"
+		status = "pending_review" // Se tem pergunta dissertativa, o professor precisa dar a nota
 	}
 
 	result := models.QuizResult{
@@ -211,6 +159,9 @@ func SubmitQuiz(c *gin.Context) {
 	})
 }
 
+// ==========================================================
+// ✍️ CORREÇÃO MANUAL DO PROFESSOR (Para questões abertas)
+// ==========================================================
 func GradeQuizManual(c *gin.Context) {
 	resultID := c.Param("result_id")
 
@@ -236,6 +187,9 @@ func GradeQuizManual(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Nota manual lançada com sucesso!"})
 }
 
+// ==========================================================
+// 🚨 ALERTA ANTI-COLA
+// ==========================================================
 func ReportCheatAttempt(c *gin.Context) {
 	quizID := c.Param("quiz_id")
 	userIDInterface, _ := c.Get("userID")
@@ -260,6 +214,9 @@ func ReportCheatAttempt(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Infração registrada silenciosamente."})
 }
 
+// ==========================================================
+// 🎓 EMISSÃO DE CERTIFICADOS
+// ==========================================================
 func ClaimCertificate(c *gin.Context) {
 	spaceID := c.Param("space_id")
 	userIDInterface, _ := c.Get("userID")
@@ -324,21 +281,4 @@ func ClaimCertificate(c *gin.Context) {
 		"message":     "Parabéns! Você concluiu o curso com sucesso.",
 		"certificate": newCert,
 	})
-}
-
-func ListSpaceQuizzes(c *gin.Context) {
-	spaceID := c.Param("space_id")
-
-	var quizzes []models.Quiz
-	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
-
-	now := time.Now()
-	for i := range quizzes {
-		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
-			quizzes[i].IsLocked = true
-			quizzes[i].Questions = []models.QuizQuestion{}
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
 }
