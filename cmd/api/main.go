@@ -217,15 +217,6 @@ func main() {
 			spaceRoutes.GET("/ranking", gamification.GetSpaceRanking)
 			spaceRoutes.PATCH("/ranking/toggle", gamification.ToggleSpaceRanking)
 
-			// =======================================================
-			// ⚔️ ARENA 1x1 (O MOTOR DE DESAFIOS)
-			// =======================================================
-			spaceRoutes.POST("/arena", gamification.CreateArenaMatch)
-			spaceRoutes.POST("/arena/:match_id/accept", gamification.AcceptArenaMatch)
-			spaceRoutes.GET("/arena/:match_id/questions", gamification.GetArenaQuestions)
-			spaceRoutes.POST("/arena/:match_id/submit", gamification.SubmitArenaMatch)
-			spaceRoutes.GET("/arena", gamification.ListArenaMatches)
-
 			// 👉 Analytics e Automação (Painel do Diretor)
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
 			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
