@@ -12,29 +12,35 @@ import (
 )
 
 // ==========================================================
-// 1️⃣ CREATE PAGE
+// 1️⃣ CREATE PAGE (Agora dentro da Guia!)
 // ==========================================================
 type CreatePageInput struct {
 	Title   string           `json:"title" binding:"required"`
 	Content json.RawMessage  `json:"content"`
 	Order   int              `json:"order"`
-	GuideID *uuid.UUID       `json:"guide_id"`
-	Tags    []models.PageTag `json:"tags"` // 👈 NOVO: Recebe as Tags na criação
+	Tags    []models.PageTag `json:"tags"`
 }
 
 func CreatePage(c *gin.Context) {
-	parsedUserID := getUserID(c) // Usa a função auxiliar do notebook.go
-	notebookIDStr := c.Param("notebook_id")
-	parsedNotebookID, _ := uuid.Parse(notebookIDStr)
+	parsedUserID := getUserID(c)
+	guideIDStr := c.Param("guide_id") // 👈 A mágica: Lê da Guia e não do Caderno
+	parsedGuideID, err := uuid.Parse(guideIDStr)
 
-	var notebook models.Notebook
-	if err := database.DB.Where("id = ?", parsedNotebookID).First(&notebook).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
 		return
 	}
 
-	// Usa o Leão de Chácara
-	if !canEditNotebook(notebook.SpaceID, parsedNotebookID, parsedUserID) {
+	var guide models.Guide
+	if err := database.DB.Where("id = ?", parsedGuideID).First(&guide).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Guia não encontrada"})
+		return
+	}
+
+	var notebook models.Notebook
+	database.DB.Where("id = ?", guide.NotebookID).First(&notebook)
+
+	if !canEditNotebook(notebook.SpaceID, notebook.ID, parsedUserID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para adicionar páginas aqui."})
 		return
 	}
@@ -49,18 +55,17 @@ func CreatePage(c *gin.Context) {
 		input.Content = []byte("{}")
 	}
 
-	// Garante que o array de tags não fique nulo
 	if input.Tags == nil {
 		input.Tags = []models.PageTag{}
 	}
 
 	newPage := models.Page{
-		NotebookID:  parsedNotebookID,
-		GuideID:     input.GuideID,
+		NotebookID:  notebook.ID,   // Mantém pra histórico
+		GuideID:     parsedGuideID, // 👈 Prende a página na guia!
 		Title:       input.Title,
 		Content:     string(input.Content),
 		Order:       input.Order,
-		Tags:        input.Tags, // 👈 Salvando as Tags!
+		Tags:        input.Tags,
 		CreatedByID: parsedUserID,
 		UpdatedByID: parsedUserID,
 	}
@@ -70,17 +75,28 @@ func CreatePage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"message": "Página criada com sucesso!", "page": newPage})
+	c.JSON(http.StatusCreated, gin.H{"message": "Página criada na guia com sucesso!", "page": newPage})
 }
 
 // ==========================================================
-// 2️⃣ UPDATE PAGE (Blindado contra Perda de Dados)
+// 📋 LISTAR PÁGINAS DA GUIA (Para o Mayan renderizar o A4)
+// ==========================================================
+func ListPagesByGuide(c *gin.Context) {
+	guideIDStr := c.Param("guide_id")
+	var pages []models.Page
+
+	// Puxa as páginas dessa guia específica, em ordem
+	database.DB.Where("guide_id = ?", guideIDStr).Order("\"order\" asc").Find(&pages)
+	c.JSON(http.StatusOK, gin.H{"pages": pages})
+}
+
+// ==========================================================
+// 2️⃣ UPDATE PAGE
 // ==========================================================
 type UpdatePageInput struct {
 	Title   *string           `json:"title"`
-	Content *json.RawMessage  `json:"content"` // 👈 Agora usa a mesma tipagem da criação
+	Content *json.RawMessage  `json:"content"`
 	Order   *int              `json:"order"`
-	GuideID *uuid.UUID        `json:"guide_id"`
 	Tags    *[]models.PageTag `json:"tags"`
 }
 
@@ -103,26 +119,20 @@ func UpdatePage(c *gin.Context) {
 	}
 
 	var input UpdatePageInput
-	// 👇 Se o JSON vier quebrado, agora ele avisa o erro exato pro Front-end
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
 		return
 	}
 
-	// Inicia o mapa apenas com o ID de quem está atualizando
 	updates := map[string]interface{}{
 		"updated_by_id": parsedUserID,
 	}
 
-	// 👇 SÓ ATUALIZA O QUE O FRONT-END MANDAR DE FATO
 	if input.Title != nil {
 		updates["title"] = *input.Title
 	}
 	if input.Order != nil {
 		updates["order"] = *input.Order
-	}
-	if input.GuideID != nil {
-		updates["guide_id"] = input.GuideID
 	}
 	if input.Tags != nil {
 		updates["tags"] = *input.Tags
@@ -140,7 +150,7 @@ func UpdatePage(c *gin.Context) {
 }
 
 // ==========================================================
-// 3️⃣ REORDER E DELETE
+// 3️⃣ REORDER E DELETE DE PÁGINAS
 // ==========================================================
 func DeletePage(c *gin.Context) {
 	pageID := c.Param("page_id")
@@ -175,12 +185,4 @@ func ReorderPages(c *gin.Context) {
 	}
 	tx.Commit()
 	c.JSON(http.StatusOK, gin.H{"message": "Ordem atualizada com sucesso!"})
-}
-
-// ListPages mantido provisoriamente para não quebrar a Fase 4
-func ListPages(c *gin.Context) {
-	notebookID := c.Param("notebook_id")
-	var pages []models.Page
-	database.DB.Where("notebook_id = ?", notebookID).Order("\"order\" asc").Find(&pages)
-	c.JSON(http.StatusOK, gin.H{"pages": pages})
 }

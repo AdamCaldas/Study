@@ -16,7 +16,12 @@ type GuideInput struct {
 	Icon          string     `json:"icon"`
 	ColorHex      string     `json:"color_hex"`
 	Order         int        `json:"order"`
-	ParentGuideID *uuid.UUID `json:"parent_guide_id"` // Manda nulo se for guia principal, manda ID se for sub-guia
+	ParentGuideID *uuid.UUID `json:"parent_guide_id"`
+
+	// 🎨 NOVOS CAMPOS PARA PAGINAÇÃO DINÂMICA
+	Orientation      string `json:"orientation"`
+	PageSize         string `json:"page_size"`
+	CustomDimensions string `json:"custom_dimensions"`
 }
 
 // ==========================================================
@@ -38,7 +43,6 @@ func CreateGuide(c *gin.Context) {
 		return
 	}
 
-	// Converte o ID do usuário da sessão
 	var userUUID uuid.UUID
 	switch v := userIDInterface.(type) {
 	case uuid.UUID:
@@ -48,15 +52,18 @@ func CreateGuide(c *gin.Context) {
 	}
 
 	guide := models.Guide{
-		NotebookID:    notebookUUID,
-		ParentGuideID: req.ParentGuideID,
-		Name:          req.Name,
-		Description:   req.Description,
-		Icon:          req.Icon,
-		ColorHex:      req.ColorHex,
-		Order:         req.Order,
-		CreatedByID:   userUUID,
-		UpdatedByID:   userUUID,
+		NotebookID:       notebookUUID,
+		ParentGuideID:    req.ParentGuideID,
+		Name:             req.Name,
+		Description:      req.Description,
+		Icon:             req.Icon,
+		ColorHex:         req.ColorHex,
+		Order:            req.Order,
+		Orientation:      req.Orientation, // 👈 Salvando a orientação
+		PageSize:         req.PageSize,    // 👈 Salvando o tamanho (A4, etc)
+		CustomDimensions: req.CustomDimensions,
+		CreatedByID:      userUUID,
+		UpdatedByID:      userUUID,
 	}
 
 	if err := database.DB.Create(&guide).Error; err != nil {
@@ -68,7 +75,7 @@ func CreateGuide(c *gin.Context) {
 }
 
 // ==========================================================
-// ✏️ EDITAR UMA GUIA (Nome, Cor, Ícone, etc)
+// ✏️ EDITAR UMA GUIA E SUAS CONFIGS DE PÁGINA
 // ==========================================================
 func UpdateGuide(c *gin.Context) {
 	guideID := c.Param("guide_id")
@@ -86,7 +93,6 @@ func UpdateGuide(c *gin.Context) {
 		return
 	}
 
-	// Converte o ID do usuário para registrar quem editou
 	var userUUID uuid.UUID
 	switch v := userIDInterface.(type) {
 	case uuid.UUID:
@@ -95,11 +101,21 @@ func UpdateGuide(c *gin.Context) {
 		userUUID, _ = uuid.Parse(v)
 	}
 
+	// Atualiza os dados normais e os de impressão!
 	guide.Name = req.Name
 	guide.Description = req.Description
 	guide.Icon = req.Icon
 	guide.ColorHex = req.ColorHex
 	guide.Order = req.Order
+	if req.Orientation != "" {
+		guide.Orientation = req.Orientation
+	}
+	if req.PageSize != "" {
+		guide.PageSize = req.PageSize
+	}
+	if req.CustomDimensions != "" {
+		guide.CustomDimensions = req.CustomDimensions
+	}
 	guide.UpdatedByID = userUUID
 
 	database.DB.Save(&guide)
@@ -108,12 +124,40 @@ func UpdateGuide(c *gin.Context) {
 }
 
 // ==========================================================
-// 🗑️ EXCLUIR UMA GUIA (E tudo dentro dela)
+// 🔄 REORDENAR GUIAS (DRAG AND DROP)
+// ==========================================================
+type ReorderGuidesRequest struct {
+	Guides []struct {
+		GuideID string `json:"guide_id"`
+		Order   int    `json:"order"`
+	} `json:"guides"`
+}
+
+func ReorderGuides(c *gin.Context) {
+	var req ReorderGuidesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido."})
+		return
+	}
+
+	tx := database.DB.Begin()
+	for _, g := range req.Guides {
+		if err := tx.Model(&models.Guide{}).Where("id = ?", g.GuideID).Update("order", g.Order).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao reordenar guias"})
+			return
+		}
+	}
+	tx.Commit()
+	c.JSON(http.StatusOK, gin.H{"message": "Ordem das guias atualizada com sucesso!"})
+}
+
+// ==========================================================
+// 🗑️ EXCLUIR UMA GUIA
 // ==========================================================
 func DeleteGuide(c *gin.Context) {
 	guideID := c.Param("guide_id")
 
-	// O GORM já vai apagar as páginas dentro dela automaticamente por causa do OnDelete:CASCADE no models.go!
 	if err := database.DB.Where("id = ?", guideID).Delete(&models.Guide{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir a Guia"})
 		return

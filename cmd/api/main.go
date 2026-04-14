@@ -81,18 +81,10 @@ func main() {
 		// 👉 Rotas de Configuração do Usuário
 		protected.PUT("/availability/:availability_id", users.UpdateAvailabilityProfile)
 
-		// 👉 Repositório Global do Professor (Questões Privadas)
-		protected.GET("/me/question-bank", study.GetMyQuestionBank)
-		protected.POST("/me/question-bank", study.SaveToQuestionBank)
-
 		// =======================================================
-		// 📚 BANCO GLOBAL DE QUESTÕES (O Robô do ENEM)
+		// 📚 BANCO GLOBAL DE QUESTÕES (Leitura Alunos/Professores)
 		// =======================================================
-		protected.POST("/questions/fetch-enem", study.FetchEnemFromWeb) // 1. O Robô que clona o GitHub
-		protected.POST("/questions", study.CreateCustomQuestion)        // 2. Aluno cria na mão
-		protected.GET("/questions", study.ListAllQuestions)             // 3. Lista tudo (com filtros)
-		protected.PUT("/questions/:id", study.UpdateQuestion)           // 4. Edita
-		protected.DELETE("/questions/:id", study.DeleteQuestion)        // 5. Apaga
+		protected.GET("/questions/studfy", study.ListStudfyQuestions)
 
 		// 👉 Notificações e Suporte (Bugs)
 		protected.GET("/notifications", admin.GetMyNotifications)
@@ -124,10 +116,16 @@ func main() {
 		protected.POST("/notebooks/:notebook_id/guides", notebook.CreateGuide)
 		protected.PUT("/guides/:guide_id", notebook.UpdateGuide)
 		protected.DELETE("/guides/:guide_id", notebook.DeleteGuide)
-		protected.POST("/notebooks/:notebook_id/pages", notebook.CreatePage)
-		protected.PATCH("/notebooks/:notebook_id/pages/reorder", notebook.ReorderPages)
+		protected.PATCH("/notebooks/:notebook_id/guides/reorder", notebook.ReorderGuides)
+
+		// =======================================================
+		// 📄 PAGINAÇÃO DINÂMICA (As páginas nascem DENTRO da Guia)
+		// =======================================================
+		protected.POST("/guides/:guide_id/pages", notebook.CreatePage)      // 👈 Cria a página no overflow
+		protected.GET("/guides/:guide_id/pages", notebook.ListPagesByGuide) // 👈 Lista pro Front renderizar o A4
+		protected.PATCH("/pages/reorder", notebook.ReorderPages)            // 👈 Arrasta e solta de páginas
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
-		protected.DELETE("/pages/:page_id", notebook.DeletePage)
+		protected.DELETE("/pages/:page_id", notebook.DeletePage) // 👈 Apaga quando fica vazia
 
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)
@@ -154,6 +152,15 @@ func main() {
 			spaceRoutes.GET("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 			spaceRoutes.PUT("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 
+			// =======================================================
+			// 📚 BANCO DE QUESTÕES DA TURMA (SPACE E EDITAIS)
+			// =======================================================
+			spaceRoutes.POST("/questions", study.CreateSpaceQuestion)
+			spaceRoutes.GET("/questions", study.ListSpaceQuestions)
+			spaceRoutes.PUT("/questions/:question_id", study.UpdateSpaceQuestion)
+			spaceRoutes.DELETE("/questions/:question_id", study.DeleteSpaceQuestion)
+			spaceRoutes.POST("/questions/clone", study.CloneStudfyQuestion) // 👈 A Mágica de Clonar!
+
 			// 👉 Ações de Cadernos e Notas Rápidas
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
@@ -166,7 +173,7 @@ func main() {
 			// 👉 MOTOR DO CRONOGRAMA (FIXED)
 			// =======================================================
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
-			spaceRoutes.POST("/plans/auto-fit", study.AutoFitPlanBlocks) // 👈 A ROTA NOVA ESTÁ AQUI
+			spaceRoutes.POST("/plans/auto-fit", study.AutoFitPlanBlocks)
 			spaceRoutes.GET("/plans", study.ListPlans)
 			spaceRoutes.PATCH("/plans/execute", study.ExecutePlanBlock)
 			spaceRoutes.PUT("/plans/full-update", study.UpdateFullPlan)
@@ -186,7 +193,7 @@ func main() {
 			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
 			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)
 
-			// 👉 Avaliações Tradicionais (Ficarão como legado)
+			// 👉 Avaliações Tradicionais
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
 			spaceRoutes.POST("/quizzes/:quiz_id/submit", study.SubmitQuiz)
@@ -213,11 +220,11 @@ func main() {
 			// =======================================================
 			// ⚔️ ARENA 1x1 (O MOTOR DE DESAFIOS)
 			// =======================================================
-			spaceRoutes.POST("/arena", gamification.CreateArenaMatch)                     // 1. Cria desafio (manda convite)
-			spaceRoutes.POST("/arena/:match_id/accept", gamification.AcceptArenaMatch)    // 2. Aceita convite
-			spaceRoutes.GET("/arena/:match_id/questions", gamification.GetArenaQuestions) // 3. Puxa as questões (Anti-cheat ativado)
-			spaceRoutes.POST("/arena/:match_id/submit", gamification.SubmitArenaMatch)    // 4. Envia respostas
-			spaceRoutes.GET("/arena", gamification.ListArenaMatches)                      // 5. Histórico e Convites Pendentes
+			spaceRoutes.POST("/arena", gamification.CreateArenaMatch)
+			spaceRoutes.POST("/arena/:match_id/accept", gamification.AcceptArenaMatch)
+			spaceRoutes.GET("/arena/:match_id/questions", gamification.GetArenaQuestions)
+			spaceRoutes.POST("/arena/:match_id/submit", gamification.SubmitArenaMatch)
+			spaceRoutes.GET("/arena", gamification.ListArenaMatches)
 
 			// 👉 Analytics e Automação (Painel do Diretor)
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
@@ -267,6 +274,11 @@ func main() {
 		godMode.POST("/help-center/articles", admin.CreateHelpArticle)
 		godMode.DELETE("/help-center/articles/:article_id", admin.DeleteHelpArticle)
 		godMode.POST("/users/batch-delete", admin.MassDeleteUsers)
+
+		// 👉 Gestão do Banco Oficial de Questões (Painel StudFy)
+		godMode.POST("/questions", study.AdminCreateStudfyQuestion)
+		godMode.PUT("/questions/:id", study.AdminUpdateStudfyQuestion)
+		godMode.DELETE("/questions/:id", study.AdminDeleteStudfyQuestion)
 	}
 
 	port := os.Getenv("PORT")

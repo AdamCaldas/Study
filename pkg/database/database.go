@@ -101,7 +101,8 @@ func ConnectDB() {
 		// ==========================================
 		&models.Follower{},
 		&models.StudentDossier{},
-		&models.QuestionBankItem{},
+		&models.StudfyQuestion{},
+		&models.SpaceQuestion{},
 		&models.FlashMission{},
 		&models.MissionCompletion{},
 		&models.Certificate{},

@@ -174,21 +174,19 @@ func SubmitArenaMatch(c *gin.Context) {
 	}
 
 	var input struct {
-		Answers          map[string]string `json:"answers"`            // Ex: "uuid-questao": "a"
-		TimeTakenSeconds int               `json:"time_taken_seconds"` // Tempo gasto no relógio
+		Answers          map[string]string `json:"answers"`
+		TimeTakenSeconds int               `json:"time_taken_seconds"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	// 1. Puxa as questões originais pra corrigir (com o gabarito de verdade)
 	var qIDs []uuid.UUID
 	json.Unmarshal([]byte(match.QuestionIDs), &qIDs)
 	var questions []models.QuestionBankItem
 	database.DB.Where("id IN ?", qIDs).Find(&questions)
 
-	// 2. Corrige a prova
 	correctCount := 0
 	for _, q := range questions {
 		if studentAns, ok := input.Answers[q.ID.String()]; ok {
@@ -198,7 +196,6 @@ func SubmitArenaMatch(c *gin.Context) {
 		}
 	}
 
-	// 3. Salva os resultados pra quem enviou (Desafiante ou Oponente)
 	isChallenger := playerID == match.ChallengerID
 
 	if isChallenger {

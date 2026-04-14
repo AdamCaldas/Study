@@ -9,8 +9,25 @@ import (
 	"github.com/google/uuid"
 )
 
+// Estrutura para receber os dados do Front-end
+type CreateFlashcardInput struct {
+	Title       string `json:"title"`
+	Category    string `json:"category"`
+	SubCategory string `json:"sub_category"`
+	Front       string `json:"front"`
+	Back        string `json:"back"`
+	Hint        string `json:"hint"`
+
+	// Integração com Questões Existentes
+	QuestionID     string `json:"question_id"`
+	QuestionSource string `json:"question_source"` // "STUDFY" (Global) ou "SPACE" (Turma)
+
+	// 👇 A NOVIDADE: Criar Questão a partir do Flashcard!
+	SaveAsSpaceQuestion bool `json:"save_as_space_question"`
+}
+
 // ==========================================================
-// ➕ 1. CRIAR UM FLASHCARD (Colaborativo)
+// ➕ 1. CRIAR UM FLASHCARD (Normal, Puxando, ou Gerando Questão)
 // ==========================================================
 func CreateFlashcard(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
@@ -24,26 +41,72 @@ func CreateFlashcard(c *gin.Context) {
 		userID, _ = uuid.Parse(v)
 	}
 
-	var input models.Flashcard
+	var input CreateFlashcardInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos do Flashcard."})
 		return
 	}
 
-	input.SpaceID = uuid.MustParse(spaceIDStr)
-	input.CreatedByID = userID
+	// 🧠 CENÁRIO 1: O aluno puxou de uma Questão Existente
+	if input.QuestionID != "" {
+		if input.QuestionSource == "STUDFY" {
+			var q models.StudfyQuestion
+			if err := database.DB.Where("id = ?", input.QuestionID).First(&q).Error; err == nil {
+				input.Title = q.Title
+				input.Category = q.Discipline
+				input.Front = q.QuestionText
+				input.Back = "Gabarito: " + q.CorrectAnswer
+			}
+		} else if input.QuestionSource == "SPACE" {
+			var q models.SpaceQuestion
+			if err := database.DB.Where("id = ?", input.QuestionID).First(&q).Error; err == nil {
+				input.Title = q.Title
+				input.Category = q.GroupID
+				input.Front = q.QuestionText
+				input.Back = "Gabarito: " + q.CorrectAnswer
+			}
+		}
+	} else if input.SaveAsSpaceQuestion {
+		// 🧠 CENÁRIO 2: O aluno digitou o Flashcard na mão e quer que vire Questão da Turma!
+		newSpaceQ := models.SpaceQuestion{
+			SpaceID:       uuid.MustParse(spaceIDStr),
+			CreatedByID:   userID,
+			Title:         input.Title,
+			Discipline:    input.Category,
+			QuestionText:  input.Front,           // A frente do card vira o enunciado
+			CorrectAnswer: input.Back,            // O verso vira a resposta correta
+			QuestionType:  "flashcard_generated", // Marca no banco que veio de um Flashcard
+			Source:        "CUSTOM",
+			Points:        1,
+			Options:       "[]", // Array vazio porque flashcard não tem alternativas A, B, C, D
+		}
+		// Salva no banco de questões do Space ANTES de criar o Flashcard
+		database.DB.Create(&newSpaceQ)
+	}
 
-	if err := database.DB.Create(&input).Error; err != nil {
+	// Monta o modelo final do Flashcard para salvar
+	newCard := models.Flashcard{
+		SpaceID:     uuid.MustParse(spaceIDStr),
+		CreatedByID: userID,
+		Title:       input.Title,
+		Category:    input.Category,
+		SubCategory: input.SubCategory,
+		Front:       input.Front,
+		Back:        input.Back,
+		Hint:        input.Hint,
+	}
+
+	if err := database.DB.Create(&newCard).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Flashcard."})
 		return
 	}
 
 	// Puxa os dados do criador pra devolver completinho pro Front
-	database.DB.Preload("Creator").First(&input, input.ID)
+	database.DB.Preload("Creator").First(&newCard, newCard.ID)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message":   "Flashcard criado e adicionado à turma!",
-		"flashcard": input,
+		"message":   "Flashcard gerado com sucesso!",
+		"flashcard": newCard,
 	})
 }
 

@@ -143,6 +143,11 @@ type Guide struct {
 	ColorHex    string `gorm:"size:7" json:"color_hex"`
 	Order       int    `json:"order"`
 
+	// 🎨 NOVOS CAMPOS PARA PAGINAÇÃO DINÂMICA
+	Orientation      string `gorm:"size:20;default:'portrait'" json:"orientation"` // portrait ou landscape
+	PageSize         string `gorm:"size:20;default:'A4'" json:"page_size"`         // A4, A3, etc.
+	CustomDimensions string `gorm:"type:jsonb" json:"custom_dimensions"`           // JSON com height/width do front
+
 	OwnerName   string `gorm:"-" json:"owner_name"`
 	UpdaterName string `gorm:"-" json:"updater_name"`
 
@@ -157,9 +162,9 @@ type Guide struct {
 
 // PAGE
 type Page struct {
-	ID         uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	NotebookID uuid.UUID  `gorm:"type:uuid;index;not null" json:"notebook_id"`
-	GuideID    *uuid.UUID `gorm:"type:uuid;index" json:"guide_id"`
+	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	NotebookID uuid.UUID `gorm:"type:uuid;index;not null" json:"notebook_id"`
+	GuideID    uuid.UUID `gorm:"type:uuid;index;not null" json:"guide_id"`
 
 	Title   string `gorm:"size:255;not null" json:"title"`
 	Content string `gorm:"type:jsonb" json:"content"`
@@ -394,22 +399,51 @@ type StudentDossier struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type QuestionBankItem struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	TeacherID uuid.UUID `gorm:"type:uuid;index;not null" json:"teacher_id"` // ID do criador (Aluno ou Admin)
+// ==========================================================
+// 📚 BANCO DE QUESTÕES GLOBAL (StudFy / ENEM)
+// ==========================================================
+type StudfyQuestion struct {
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 
-	// 👇 NOVOS CAMPOS PARA OS FILTROS DO FRONT-END
-	Title      string `gorm:"size:255" json:"title"`                  // Ex: "Questão 136" ou "Minha Questão"
-	Discipline string `gorm:"size:100" json:"discipline"`             // Ex: "Matemática", "História"
-	Year       int    `json:"year"`                                   // Ex: 2022
-	Source     string `gorm:"size:50;default:'custom'" json:"source"` // Ex: "ENEM" ou "CUSTOM"
+	// Sem dono! Pertence ao sistema.
+	Title      string `gorm:"size:255" json:"title"`
+	Discipline string `gorm:"size:100" json:"discipline"`
+	Year       int    `json:"year"`
+	Source     string `gorm:"size:50;default:'STUDFY'" json:"source"` // Ex: "ENEM", "STUDFY"
 
-	QuestionText  string    `gorm:"type:text;not null" json:"question_text"`
-	QuestionType  string    `gorm:"size:50;not null;default:'multiple_choice'" json:"question_type"`
-	Options       string    `gorm:"type:jsonb" json:"options"`
-	CorrectAnswer string    `gorm:"type:text" json:"correct_answer"`
-	Points        int       `gorm:"default:1" json:"points"`
-	CreatedAt     time.Time `json:"created_at"`
+	QuestionText  string `gorm:"type:text;not null" json:"question_text"`
+	QuestionType  string `gorm:"size:50;not null;default:'multiple_choice'" json:"question_type"`
+	Options       string `gorm:"type:jsonb" json:"options"` // Array JSON salvo como string
+	CorrectAnswer string `gorm:"type:text" json:"correct_answer"`
+	Points        int    `gorm:"default:1" json:"points"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ==========================================================
+// 🏫 BANCO DE QUESTÕES DA TURMA (Space)
+// ==========================================================
+type SpaceQuestion struct {
+	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"` // De qual turma é
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`  // Qual colaborador criou/clonou
+
+	GroupID string `gorm:"size:50" json:"group_id"` // 👈 MÁGICA DOS EDITAIS: Agrupa as questões em pastas!
+
+	Title      string `gorm:"size:255" json:"title"`
+	Discipline string `gorm:"size:100" json:"discipline"`
+	Year       int    `json:"year"`
+	Source     string `gorm:"size:50;default:'CUSTOM'" json:"source"` // Ex: "CUSTOM" (Criada zero) ou "CLONED" (Copiada do StudFy)
+
+	QuestionText  string `gorm:"type:text;not null" json:"question_text"`
+	QuestionType  string `gorm:"size:50;not null;default:'multiple_choice'" json:"question_type"`
+	Options       string `gorm:"type:jsonb" json:"options"`
+	CorrectAnswer string `gorm:"type:text" json:"correct_answer"`
+	Points        int    `gorm:"default:1" json:"points"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type FlashMission struct {
