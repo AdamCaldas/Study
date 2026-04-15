@@ -45,28 +45,27 @@ func ConnectDB() {
 	// ==========================================================
 	// 🧹 LIXEIRA TEMPORÁRIA (Limpeza da Unificação)
 	// ==========================================================
-	// DICA DE SÊNIOR: Deixe esse código rodar UMA VEZ quando você iniciar o servidor.
-	// Ele vai limpar a "sujeira" das tabelas antigas do banco de dados.
-	// Depois que rodar com sucesso a primeira vez, você pode apagar esta linha se quiser.
 	log.Println("Limpando tabelas antigas de ciclo e plano...")
 	db.Migrator().DropTable("study_cycles", "study_cycle_items", "study_plans")
 
-	// 👇 COLOQUE A BOMBA AQUI 👇
 	log.Println("Destruindo o cadeado do banco para permitir Ciclo + Plano juntos...")
 	db.Exec("DROP INDEX IF EXISTS idx_study_strategies_space_id;")
 
-	// --- MIGRATIONS ---
+	// ==========================================================
+	// 🚀 RODANDO AS MIGRATIONS (Sincronizando Tabelas)
+	// ==========================================================
 	log.Println("Rodando as Migrations do banco de dados...")
 	err = db.AutoMigrate(
 		&models.User{},
 		&models.Space{},
 		&models.SpacePermission{},
 		&models.Notebook{},
+		&models.Guide{}, // 👈 Essencial para Paginação Dinâmica
 		&models.Page{},
-		&models.PageNote{}, // 📝 NOVO: Notas da Página
+		&models.PageNote{},
 		&models.QuickNote{},
-		&models.StudyStrategy{}, // 🧠 NOVO: Motor Unificado (A Estratégia Mestra)
-		&models.StudyBlock{},    // 🧱 NOVO: Blocos de Estudo (Os horários/roleta)
+		&models.StudyStrategy{},
+		&models.StudyBlock{},
 		&models.PomodoroSession{},
 		&models.MoodCheckIn{},
 		&models.SpaceTag{},
@@ -81,40 +80,47 @@ func ConnectDB() {
 		&models.NotificationRead{},
 		&models.NotebookPermission{},
 		&models.GamificationRule{},
-		&models.Guide{},
 		&models.BugReport{},
 		&models.VerificationCode{},
 		&models.PasswordReset{},
 		&models.StudySession{},
 		&models.AvailabilityProfile{},
 
-		// ==========================================
-		// 📊 NOVO: TABELAS DE LOGS (Specs do Chefão)
-		// ==========================================
+		// 📊 TABELAS DE LOGS (Execução Diária)
 		&models.CycleLog{},
 		&models.CycleLogBlock{},
 		&models.ScheduleLog{},
 		&models.ScheduleLogBlock{},
 
-		// ==========================================
-		// 👇 FASES 1 A 7 👇
-		// ==========================================
-		&models.Follower{},
-		&models.StudentDossier{},
+		// 📚 BANCO DE QUESTÕES E EDITAIS
 		&models.StudfyQuestion{},
 		&models.SpaceQuestion{},
+		&models.QuestionGroup{}, // 👈 NOVO: As pastas dos Editais!
+
+		// 🃏 FLASHCARDS E GAMIFICAÇÃO
+		&models.Flashcard{},  // 👈 AQUI ESTÁ A SOLUÇÃO DO ERRO 500!
+		&models.ArenaMatch{}, // 👈 ⚔️ Arena 1x1
+		&models.Follower{},
+		&models.Badge{},
+		&models.UserBadge{},
 		&models.FlashMission{},
 		&models.MissionCompletion{},
+
+		// 🏫 GESTÃO ACADÊMICA
+		&models.StudentDossier{},
 		&models.Certificate{},
 		&models.PageDoubt{},
 		&models.AttendanceSession{},
 		&models.AttendanceRecord{},
-		&models.Badge{},
-		&models.UserBadge{},
 		&models.AutomationRule{},
+
+		// 💡 CENTRAL DE AJUDA (Academy)
+		&models.HelpCategory{},
+		&models.HelpArticle{},
 	)
+
 	if err != nil {
 		log.Fatal("Falha ao rodar as migrations: ", err)
 	}
-	log.Println("✅ Tabelas sincronizadas com sucesso!")
+	log.Println("✅ Todas as tabelas (Fases 1 a 7 + Extras) sincronizadas com sucesso!")
 }
