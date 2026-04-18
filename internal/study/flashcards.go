@@ -1,7 +1,9 @@
 package study
 
 import (
+	"encoding/json"
 	"net/http"
+
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 
@@ -11,28 +13,27 @@ import (
 
 // Estrutura para receber os dados do Front-end
 type CreateFlashcardInput struct {
-	Title       string `json:"title"`
-	Category    string `json:"category"`
-	SubCategory string `json:"sub_category"`
-	Front       string `json:"front"`
-	Back        string `json:"back"`
-	Hint        string `json:"hint"`
+	Title       string          `json:"title"`
+	GroupID     string          `json:"group_id"`
+	Category    string          `json:"category"`
+	SubCategory string          `json:"sub_category"`
+	Tags        json.RawMessage `json:"tags"` // 👈 Recebe as Tags como array JSON ["CESPE", "Difícil"]
+	Front       string          `json:"front"`
+	Back        string          `json:"back"`
+	Hint        string          `json:"hint"`
 
-	// Integração com Questões Existentes
-	QuestionID     string `json:"question_id"`
-	QuestionSource string `json:"question_source"` // "STUDFY" (Global) ou "SPACE" (Turma)
-
-	// 👇 A NOVIDADE: Criar Questão a partir do Flashcard!
-	SaveAsSpaceQuestion bool `json:"save_as_space_question"`
+	QuestionID          string `json:"question_id"`
+	QuestionSource      string `json:"question_source"`
+	SaveAsSpaceQuestion bool   `json:"save_as_space_question"`
 }
 
 // ==========================================================
-// ➕ 1. CRIAR UM FLASHCARD (Normal, Puxando, ou Gerando Questão)
+// ➕ 1. CRIAR UM FLASHCARD (Com Tags e Filtros)
 // ==========================================================
 func CreateFlashcard(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-
 	userIDInterface, _ := c.Get("userID")
+
 	var userID uuid.UUID
 	switch v := userIDInterface.(type) {
 	case uuid.UUID:
@@ -47,7 +48,12 @@ func CreateFlashcard(c *gin.Context) {
 		return
 	}
 
-	// 🧠 CENÁRIO 1: O aluno puxou de uma Questão Existente
+	// Garante que as tags nunca fiquem nulas no banco
+	tagsStr := string(input.Tags)
+	if len(input.Tags) == 0 || tagsStr == "null" {
+		tagsStr = "[]"
+	}
+
 	if input.QuestionID != "" {
 		if input.QuestionSource == "STUDFY" {
 			var q models.StudfyQuestion
@@ -61,36 +67,37 @@ func CreateFlashcard(c *gin.Context) {
 			var q models.SpaceQuestion
 			if err := database.DB.Where("id = ?", input.QuestionID).First(&q).Error; err == nil {
 				input.Title = q.Title
-				input.Category = q.GroupID
+				input.GroupID = q.GroupID
+				input.Category = q.Discipline
 				input.Front = q.QuestionText
 				input.Back = "Gabarito: " + q.CorrectAnswer
 			}
 		}
 	} else if input.SaveAsSpaceQuestion {
-		// 🧠 CENÁRIO 2: O aluno digitou o Flashcard na mão e quer que vire Questão da Turma!
 		newSpaceQ := models.SpaceQuestion{
 			SpaceID:       uuid.MustParse(spaceIDStr),
 			CreatedByID:   userID,
 			Title:         input.Title,
 			Discipline:    input.Category,
-			QuestionText:  input.Front,           // A frente do card vira o enunciado
-			CorrectAnswer: input.Back,            // O verso vira a resposta correta
-			QuestionType:  "flashcard_generated", // Marca no banco que veio de um Flashcard
+			GroupID:       input.GroupID,
+			QuestionText:  input.Front,
+			CorrectAnswer: input.Back,
+			QuestionType:  "flashcard_generated",
 			Source:        "CUSTOM",
 			Points:        1,
-			Options:       "[]", // Array vazio porque flashcard não tem alternativas A, B, C, D
+			Options:       "[]",
 		}
-		// Salva no banco de questões do Space ANTES de criar o Flashcard
 		database.DB.Create(&newSpaceQ)
 	}
 
-	// Monta o modelo final do Flashcard para salvar
 	newCard := models.Flashcard{
 		SpaceID:     uuid.MustParse(spaceIDStr),
 		CreatedByID: userID,
+		GroupID:     input.GroupID,
 		Title:       input.Title,
 		Category:    input.Category,
 		SubCategory: input.SubCategory,
+		Tags:        tagsStr, // 👈 Salva as tags!
 		Front:       input.Front,
 		Back:        input.Back,
 		Hint:        input.Hint,
@@ -101,38 +108,39 @@ func CreateFlashcard(c *gin.Context) {
 		return
 	}
 
-	// Puxa os dados do criador pra devolver completinho pro Front
 	database.DB.Preload("Creator").First(&newCard, newCard.ID)
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message":   "Flashcard gerado com sucesso!",
-		"flashcard": newCard,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Flashcard gerado com sucesso!", "flashcard": newCard})
 }
 
 // ==========================================================
-// 📋 2. LISTAR FLASHCARDS (Com Filtros e Pesquisa de Texto)
+// 📋 2. LISTAR FLASHCARDS (O Motor de Filtros Completo)
 // ==========================================================
 func ListFlashcards(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
-	// Pega os filtros da URL
+	// Todos os Filtros que o Mayan pode usar!
+	groupID := c.Query("group_id")
 	category := c.Query("category")
 	subCategory := c.Query("sub_category")
-	searchQuery := c.Query("search") // 👈 O NOVO FILTRO DE PESQUISA POR TEXTO!
+	tag := c.Query("tag") // 👈 Filtro por Tag (Ex: ?tag=CESPE)
+	searchQuery := c.Query("search")
 
-	// O Preload("Creator") traz o Nome do aluno que fez o card
 	query := database.DB.Preload("Creator").Where("space_id = ?", spaceID)
 
-	// Aplica os filtros dinamicamente se o Front-end mandar
+	if groupID != "" {
+		query = query.Where("group_id = ?", groupID)
+	}
 	if category != "" {
 		query = query.Where("category = ?", category)
 	}
 	if subCategory != "" {
 		query = query.Where("sub_category = ?", subCategory)
 	}
+	if tag != "" {
+		// Pesquisa dentro do Array JSONB se a tag existe!
+		query = query.Where("tags ILIKE ?", "%\""+tag+"\"%")
+	}
 	if searchQuery != "" {
-		// Pesquisa a palavra digitada tanto no Título quanto na Pergunta (Front) da carta
 		query = query.Where("title ILIKE ? OR front ILIKE ?", "%"+searchQuery+"%", "%"+searchQuery+"%")
 	}
 
@@ -143,7 +151,7 @@ func ListFlashcards(c *gin.Context) {
 }
 
 // ==========================================================
-// ✏️ 3. EDITAR FLASHCARD (Regra de Permissão)
+// ✏️ 3. EDITAR FLASHCARD
 // ==========================================================
 func UpdateFlashcard(c *gin.Context) {
 	spaceID := c.Param("space_id")
@@ -158,7 +166,7 @@ func UpdateFlashcard(c *gin.Context) {
 		playerID, _ = uuid.Parse(v)
 	}
 
-	var input models.Flashcard
+	var input CreateFlashcardInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
@@ -173,16 +181,22 @@ func UpdateFlashcard(c *gin.Context) {
 		return
 	}
 
-	// 🚨 TRAVA DE SEGURANÇA: Só o Dono do Card OU o Dono do Space podem editar!
 	if card.CreatedByID != playerID && space.OwnerID != playerID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão. Apenas o criador do card ou o dono da turma podem editar."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão para editar."})
 		return
+	}
+
+	tagsStr := string(input.Tags)
+	if len(input.Tags) == 0 || tagsStr == "null" {
+		tagsStr = card.Tags // Mantém a antiga se não mandar nova
 	}
 
 	database.DB.Model(&card).Updates(map[string]interface{}{
 		"title":        input.Title,
+		"group_id":     input.GroupID,
 		"category":     input.Category,
 		"sub_category": input.SubCategory,
+		"tags":         tagsStr, // 👈 Atualiza a tag
 		"front":        input.Front,
 		"back":         input.Back,
 		"hint":         input.Hint,
@@ -192,7 +206,7 @@ func UpdateFlashcard(c *gin.Context) {
 }
 
 // ==========================================================
-// 🗑️ 4. APAGAR FLASHCARD (Regra de Permissão)
+// 🗑️ 4. APAGAR FLASHCARD
 // ==========================================================
 func DeleteFlashcard(c *gin.Context) {
 	spaceID := c.Param("space_id")
@@ -216,9 +230,8 @@ func DeleteFlashcard(c *gin.Context) {
 		return
 	}
 
-	// 🚨 TRAVA DE SEGURANÇA: Só o Dono do Card OU o Dono do Space podem excluir!
 	if card.CreatedByID != playerID && space.OwnerID != playerID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão. Apenas o criador do card ou o dono da turma podem excluir."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Sem permissão."})
 		return
 	}
 

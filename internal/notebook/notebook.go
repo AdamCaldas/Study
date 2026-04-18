@@ -156,17 +156,22 @@ func UpdateNotebook(c *gin.Context) {
 }
 
 // ==========================================================
-// 🗑️ DELETE NOTEBOOK
+// 🗑️ DELETE NOTEBOOK (Com remoção automática do Ciclo!)
 // ==========================================================
 func DeleteNotebook(c *gin.Context) {
 	notebookID := c.Param("notebook_id")
+
+	// 👇 A MÁGICA AQUI: Se o caderno estava no Ciclo de Estudos, apagamos o bloco dele!
+	// Como a tabela de Logs guarda os dados de forma independente, o Histórico do aluno NÃO é apagado!
+	database.DB.Where("notebook_id = ?", notebookID).Delete(&models.StudyBlock{})
 
 	// O GORM Cascata vai apagar as Guias e as Páginas sozinhas!
 	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "Caderno apagado!"})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Caderno apagado e removido do ciclo com sucesso!"})
 }
 
 // ListNotebooks mantido provisoriamente para não quebrar a Fase 4

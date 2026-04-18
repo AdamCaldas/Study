@@ -697,6 +697,10 @@ type Flashcard struct {
 	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
 	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`
 
+	GroupID string `gorm:"size:50" json:"group_id"` // 👈 ADICIONE ISSO: A pasta do Edital!
+
+	Tags string `gorm:"type:jsonb;default:'[]'" json:"tags"`
+
 	Title       string `gorm:"size:255;not null" json:"title"`
 	Category    string `gorm:"size:100" json:"category"`     // Ex: Matemática
 	SubCategory string `gorm:"size:100" json:"sub_category"` // Ex: Álgebra
