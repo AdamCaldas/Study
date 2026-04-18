@@ -223,12 +223,38 @@ func main() {
 			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
 
 			// =======================================================
+			// 📁 PASTAS DE EDITAIS E MATÉRIAS (QUESTION GROUPS)
+			// =======================================================
+			spaceRoutes.POST("/question-groups", study.CreateQuestionGroup)
+			spaceRoutes.GET("/question-groups", study.ListQuestionGroups)
+			spaceRoutes.PUT("/question-groups/:group_id", study.UpdateQuestionGroup)
+			spaceRoutes.DELETE("/question-groups/:group_id", study.DeleteQuestionGroup)
+
+			// =======================================================
 			// 🃏 FLASHCARDS COLABORATIVOS (Wiki da Turma)
 			// =======================================================
 			spaceRoutes.POST("/flashcards", study.CreateFlashcard)
 			spaceRoutes.GET("/flashcards", study.ListFlashcards)
 			spaceRoutes.PUT("/flashcards/:card_id", study.UpdateFlashcard)
 			spaceRoutes.DELETE("/flashcards/:card_id", study.DeleteFlashcard)
+			// =======================================================
+			// 🏷️ FILTROS DOS FLASHCARDS (Rotas pro Front-end novo)
+			// =======================================================
+			spaceRoutes.POST("/flashcard-categories", study.CreateCategory)
+			spaceRoutes.GET("/flashcard-categories", study.ListCategories)
+			spaceRoutes.DELETE("/flashcard-categories/:category_id", study.DeleteCategory)
+
+			spaceRoutes.POST("/flashcard-tags", study.CreateTag)
+			spaceRoutes.GET("/flashcard-tags", study.ListTags)
+			spaceRoutes.DELETE("/flashcard-tags/:tag_id", study.DeleteTag)
+
+			// =======================================================
+			// 📁 PASTAS DE EDITAIS E MATÉRIAS (QUESTION GROUPS)
+			// =======================================================
+			spaceRoutes.POST("/question-groups", study.CreateQuestionGroup)
+			spaceRoutes.GET("/question-groups", study.ListQuestionGroups)
+			spaceRoutes.PUT("/question-groups/:group_id", study.UpdateQuestionGroup)
+			spaceRoutes.DELETE("/question-groups/:group_id", study.DeleteQuestionGroup)
 		}
 	}
 

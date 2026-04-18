@@ -117,6 +117,12 @@ func ConnectDB() {
 		// 💡 CENTRAL DE AJUDA (Academy)
 		&models.HelpCategory{},
 		&models.HelpArticle{},
+
+		// ==========================================================
+		// 🏷️ FILTROS DOS FLASHCARDS (Pro Front-end novo)
+		// ==========================================================
+		&models.FlashcardCategory{},
+		&models.FlashcardTag{},
 	)
 
 	if err != nil {

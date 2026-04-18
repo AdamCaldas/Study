@@ -722,8 +722,25 @@ type Flashcard struct {
 type QuestionGroup struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"` // 👈 Novo: Quem criou a pasta
 	Name        string    `gorm:"size:255;not null" json:"name"`
 	Description string    `gorm:"type:text" json:"description"`
 	ColorHex    string    `gorm:"size:7;default:'#3B82F6'" json:"color_hex"`
 	CreatedAt   time.Time `json:"created_at"`
+	Creator *User `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"` // 👈 Novo: Traz a foto e o nome pro Front
+}
+
+// ==========================================================
+// 🏷️ CATEGORIAS E TAGS (Para facilitar o Front-end)
+// ==========================================================
+type FlashcardCategory struct {
+	ID      uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	Name    string    `gorm:"size:100;not null" json:"name"`
+}
+
+type FlashcardTag struct {
+	ID      uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	SpaceID uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
+	Name    string    `gorm:"size:50;not null" json:"name"`
 }
