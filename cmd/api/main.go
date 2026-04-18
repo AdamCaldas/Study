@@ -222,14 +222,7 @@ func main() {
 			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
 			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
 
-			// =======================================================
-			// 📁 PASTAS DE EDITAIS E MATÉRIAS (QUESTION GROUPS)
-			// =======================================================
-			spaceRoutes.POST("/question-groups", study.CreateQuestionGroup)
-			spaceRoutes.GET("/question-groups", study.ListQuestionGroups)
-			spaceRoutes.PUT("/question-groups/:group_id", study.UpdateQuestionGroup)
-			spaceRoutes.DELETE("/question-groups/:group_id", study.DeleteQuestionGroup)
-
+			
 			// =======================================================
 			// 🃏 FLASHCARDS COLABORATIVOS (Wiki da Turma)
 			// =======================================================
