@@ -129,4 +129,4 @@ func ConnectDB() {
 		log.Fatal("Falha ao rodar as migrations: ", err)
 	}
 	log.Println("✅ Todas as tabelas (Fases 1 a 7 + Extras) sincronizadas com sucesso!")
-}s
+}
