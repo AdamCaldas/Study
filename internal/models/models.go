@@ -119,6 +119,11 @@ type Notebook struct {
 	UnlockAt *time.Time `json:"unlock_at"`
 	IsLocked bool       `gorm:"-" json:"is_locked"`
 
+	// 👇 NOVOS CAMPOS PARA SALVAR O ESTADO DO FRONT-END (ZUSTAND) NO BANCO!
+	IsFullWidth       bool `gorm:"default:false" json:"is_full_width"`
+	IsPageCardVisible bool `gorm:"default:true" json:"is_page_card_visible"`
+	IsPaginated       bool `gorm:"default:false" json:"is_paginated"`
+
 	Guides []Guide `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"guides"`
 	Pages  []Page  `gorm:"foreignKey:NotebookID;constraint:OnDelete:CASCADE" json:"pages"`
 

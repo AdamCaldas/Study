@@ -117,7 +117,12 @@ func CreateNotebook(c *gin.Context) {
 type UpdateNotebookInput struct {
 	Name       string `json:"name"`
 	ColorHex   string `json:"color_hex"`
-	Visibility string `json:"visibility"` // 👈 Adicionado para edição
+	Visibility string `json:"visibility"`
+
+	// 👇 NOVOS CAMPOS PARA SALVAR O ESTADO DO ZUSTAND (FRONT-END)
+	IsFullWidth       *bool `json:"is_full_width"`
+	IsPageCardVisible *bool `json:"is_page_card_visible"`
+	IsPaginated       *bool `json:"is_paginated"`
 }
 
 func UpdateNotebook(c *gin.Context) {
@@ -142,12 +147,33 @@ func UpdateNotebook(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Model(&notebook).Updates(map[string]interface{}{
-		"name":          input.Name,
-		"color_hex":     input.ColorHex,
-		"visibility":    input.Visibility, // 👈 Atualiza no banco
-		"updated_by_id": parsedUserID,     // ASSINATURA
-	}).Error; err != nil {
+	// Criamos um mapa para atualizar apenas o que o front-end enviar no JSON
+	updates := map[string]interface{}{
+		"updated_by_id": parsedUserID, // ASSINATURA
+	}
+
+	if input.Name != "" {
+		updates["name"] = input.Name
+	}
+	if input.ColorHex != "" {
+		updates["color_hex"] = input.ColorHex
+	}
+	if input.Visibility != "" {
+		updates["visibility"] = input.Visibility
+	}
+
+	// 👇 INJETANDO OS NOVOS CAMPOS NO BANCO SE O FRONT ENVIAR!
+	if input.IsFullWidth != nil {
+		updates["is_full_width"] = *input.IsFullWidth
+	}
+	if input.IsPageCardVisible != nil {
+		updates["is_page_card_visible"] = *input.IsPageCardVisible
+	}
+	if input.IsPaginated != nil {
+		updates["is_paginated"] = *input.IsPaginated
+	}
+
+	if err := database.DB.Model(&notebook).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar"})
 		return
 	}
