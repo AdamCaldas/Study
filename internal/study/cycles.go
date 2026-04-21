@@ -107,11 +107,12 @@ func GenerateAutoCycle(c *gin.Context) {
 
 			// 👇 A MÁGICA ENTRA AQUI: Criar o Guia (Pasta) antes da Página!
 			newGuide := models.Guide{
-				NotebookID:  newNb.ID,
-				Name:        "Geral", // Nome padrão da primeira pasta
-				Order:       0,
-				CreatedByID: parsedUserID,
-				UpdatedByID: parsedUserID,
+				NotebookID:       newNb.ID,
+				Name:             "Geral", // Nome padrão da primeira pasta
+				Order:            0,
+				CustomDimensions: "{}", // 👈 A CORREÇÃO ESTÁ AQUI! (Envia um JSON vazio válido)
+				CreatedByID:      parsedUserID,
+				UpdatedByID:      parsedUserID,
 			}
 			if err := tx.Create(&newGuide).Error; err != nil {
 				tx.Rollback()
