@@ -105,8 +105,24 @@ func GenerateAutoCycle(c *gin.Context) {
 				return
 			}
 
+			// 👇 A MÁGICA ENTRA AQUI: Criar o Guia (Pasta) antes da Página!
+			newGuide := models.Guide{
+				NotebookID:  newNb.ID,
+				Name:        "Geral", // Nome padrão da primeira pasta
+				Order:       0,
+				CreatedByID: parsedUserID,
+				UpdatedByID: parsedUserID,
+			}
+			if err := tx.Create(&newGuide).Error; err != nil {
+				tx.Rollback()
+				c.JSON(500, gin.H{"error": "Erro ao criar guia de " + disc.Name + ": " + err.Error()})
+				return
+			}
+
+			// 👇 Agora a Página é criada com o GuideID certinho!
 			newPage := models.Page{
 				NotebookID:  newNb.ID,
+				GuideID:     newGuide.ID, // 👈 O ID DA PASTA SALVA A PÁTRIA!
 				Title:       "Anotações - " + disc.Name,
 				Content:     "{\"html\": \"<p>Comece a digitar seus resumos aqui...</p>\"}",
 				Order:       0,
