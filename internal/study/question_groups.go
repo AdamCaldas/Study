@@ -5,6 +5,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,14 +22,17 @@ type QuestionGroupInput struct {
 // ==========================================================
 func CreateQuestionGroup(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var input QuestionGroupInput
@@ -38,7 +42,7 @@ func CreateQuestionGroup(c *gin.Context) {
 	}
 
 	newGroup := models.QuestionGroup{
-		SpaceID:     uuid.MustParse(spaceIDStr),
+		SpaceID:     parsedSpaceID,
 		CreatedByID: userID, // 👈 Salva o dono da pasta!
 		Name:        input.Name,
 		Description: input.Description,
@@ -46,7 +50,7 @@ func CreateQuestionGroup(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&newGroup).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar grupo."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar grupo."}) // 👈 Erro blindado
 		return
 	}
 
@@ -61,10 +65,14 @@ func CreateQuestionGroup(c *gin.Context) {
 // ==========================================================
 func ListQuestionGroups(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
 	var groups []models.QuestionGroup
-	// O Preload("Creator") garante que o Front-end receba o ProfilePic do dono da pasta!
-	database.DB.Preload("Creator").Where("space_id = ?", spaceIDStr).Order("created_at asc").Find(&groups)
+	database.DB.Preload("Creator").Where("space_id = ?", parsedSpaceID).Order("created_at asc").Find(&groups)
 
 	c.JSON(http.StatusOK, gin.H{"groups": groups})
 }
@@ -73,8 +81,14 @@ func ListQuestionGroups(c *gin.Context) {
 // ✏️ 3. EDITAR UMA PASTINHA
 // ==========================================================
 func UpdateQuestionGroup(c *gin.Context) {
-	groupID := c.Param("group_id")
+	groupIDStr := c.Param("group_id")
 	spaceIDStr := c.Param("space_id")
+
+	parsedGroupID, err := uuid.Parse(groupIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Grupo inválido."})
+		return
+	}
 
 	var input QuestionGroupInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -82,7 +96,7 @@ func UpdateQuestionGroup(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Model(&models.QuestionGroup{}).Where("id = ? AND space_id = ?", groupID, spaceIDStr).Updates(map[string]interface{}{
+	if err := database.DB.Model(&models.QuestionGroup{}).Where("id = ? AND space_id = ?", parsedGroupID, spaceIDStr).Updates(map[string]interface{}{
 		"name":        input.Name,
 		"description": input.Description,
 		"color_hex":   input.ColorHex,
@@ -98,10 +112,16 @@ func UpdateQuestionGroup(c *gin.Context) {
 // 🗑️ 4. APAGAR UMA PASTINHA
 // ==========================================================
 func DeleteQuestionGroup(c *gin.Context) {
-	groupID := c.Param("group_id")
+	groupIDStr := c.Param("group_id")
 	spaceIDStr := c.Param("space_id")
 
-	if err := database.DB.Where("id = ? AND space_id = ?", groupID, spaceIDStr).Delete(&models.QuestionGroup{}).Error; err != nil {
+	parsedGroupID, err := uuid.Parse(groupIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Grupo inválido."})
+		return
+	}
+
+	if err := database.DB.Where("id = ? AND space_id = ?", parsedGroupID, spaceIDStr).Delete(&models.QuestionGroup{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar pasta."})
 		return
 	}

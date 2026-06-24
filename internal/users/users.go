@@ -7,6 +7,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -14,19 +15,12 @@ import (
 )
 
 // ==========================================================
-// 1️⃣ Puxa o Perfil Completo (Raio-X de Desempenho para o Front)
+// 1️⃣ Puxa o Perfil Completo
 // ==========================================================
 func GetMyProfile(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação"})
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
 		return
 	}
 
@@ -36,9 +30,6 @@ func GetMyProfile(c *gin.Context) {
 		return
 	}
 
-	// ---------------------------------------------------------
-	// 🧙‍♂️ MÁGICA: Calcular Resumo de Desempenho
-	// ---------------------------------------------------------
 	var skills []string
 	database.DB.Table("notebooks").
 		Select("DISTINCT name").
@@ -60,9 +51,6 @@ func GetMyProfile(c *gin.Context) {
 		{"id": 3, "name": "Escritor Ávido", "icon_url": "url-do-trofeu", "is_unlocked": false},
 	}
 
-	// ---------------------------------------------------------
-	// 🌟 NOVO: As Estatísticas (Usage Stats) pedidas pelo Mayan
-	// ---------------------------------------------------------
 	var qtdNotebooks, qtdNotes, qtdStrategies int64
 	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", userID).Count(&qtdNotebooks)
 	database.DB.Model(&models.StudyStrategy{}).Where("created_by_id = ?", userID).Count(&qtdStrategies)
@@ -72,7 +60,6 @@ func GetMyProfile(c *gin.Context) {
 		Where("spaces.owner_id = ?", userID).
 		Count(&qtdNotes)
 
-	// 🌟 NOVO: Busca de todas as Estratégias e Blocos do usuário (A Agenda Inteira)
 	var userStrategies []models.StudyStrategy
 	database.DB.Preload("Blocks").
 		Joins("JOIN spaces ON spaces.id = study_strategies.space_id").
@@ -85,18 +72,12 @@ func GetMyProfile(c *gin.Context) {
 		userStrategies = []models.StudyStrategy{}
 	}
 
-	// ---------------------------------------------------------
-	// 2. Busca os Spaces que ele é o DONO
-	// ---------------------------------------------------------
 	var ownedSpaces []models.Space
 	database.DB.Select("id, name, color_hex, category").Where("owner_id = ?", userID).Find(&ownedSpaces)
 	if ownedSpaces == nil {
 		ownedSpaces = []models.Space{}
 	}
 
-	// ---------------------------------------------------------
-	// 3. Busca os Spaces que ele é CONVIDADO
-	// ---------------------------------------------------------
 	var guestSpaces []struct {
 		SpaceID           string `json:"space_id"`
 		Name              string `json:"name"`
@@ -126,16 +107,12 @@ func GetMyProfile(c *gin.Context) {
 		}{}
 	}
 
-	// ---------------------------------------------------------
-	// 👉 AQUI A MÁGICA: Busca as Rotinas Globais do Usuário
-	// ---------------------------------------------------------
 	var availabilityProfiles []models.AvailabilityProfile
 	database.DB.Where("user_id = ?", userID).Find(&availabilityProfiles)
 	if availabilityProfiles == nil {
 		availabilityProfiles = []models.AvailabilityProfile{}
 	}
 
-	// 4. Monta o JSON GIGANTE de Resposta com tudo que o Front-end pediu
 	c.JSON(http.StatusOK, gin.H{
 		"profile": user,
 		"stats": gin.H{
@@ -154,15 +131,19 @@ func GetMyProfile(c *gin.Context) {
 		"study_strategies":      userStrategies,
 		"owned_spaces":          ownedSpaces,
 		"guest_spaces":          guestSpaces,
-		"availability_profiles": availabilityProfiles, // 👈 ENVIANDO A ROTINA PARA O MAYAN AQUI!
+		"availability_profiles": availabilityProfiles,
 	})
 }
 
 // ==========================================================
-// 2️⃣ Atualiza os dados do Perfil (Incluindo os novos do Mayan)
+// 2️⃣ Atualiza os dados do Perfil
 // ==========================================================
 func UpdateMyProfile(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	var input struct {
 		FullName         string     `json:"full_name"`
@@ -178,7 +159,7 @@ func UpdateMyProfile(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
@@ -220,7 +201,7 @@ func UpdateMyProfile(c *gin.Context) {
 	}
 
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar perfil"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar perfil."})
 		return
 	}
 
@@ -228,28 +209,32 @@ func UpdateMyProfile(c *gin.Context) {
 }
 
 // ==========================================================
-// 🔐 3️⃣ Atualizar Senha (Segurança com Bcrypt)
+// 🔐 3️⃣ Atualizar Senha
 // ==========================================================
 func UpdatePassword(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	var input struct {
 		NewPassword string `json:"new_password" binding:"required,min=6"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "A nova senha deve ter pelo menos 6 caracteres."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Senha inválida."})
 		return
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar nova senha"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar nova senha."})
 		return
 	}
 
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("password", string(hashedPassword)).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar nova senha no banco"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar nova senha."})
 		return
 	}
 
@@ -257,33 +242,30 @@ func UpdatePassword(c *gin.Context) {
 }
 
 // ==========================================================
-// 🚨 4️⃣ Deleta a própria conta (O Botão Vermelho)
+// 🚨 4️⃣ Deleta conta
 // ==========================================================
 func DeleteMyAccount(c *gin.Context) {
-	userID, _ := c.Get("userID")
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	if err := database.DB.Where("id = ?", userID).Delete(&models.User{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir conta."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Conta excluída com sucesso."})
+	c.JSON(http.StatusOK, gin.H{"message": "Conta excluída."})
 }
 
 // ==========================================================
-// 🎓 TRANSFORMAR USUÁRIO EM PROFESSOR (Onboarding B2B)
+// 🎓 TRANSFORMAR USUÁRIO EM PROFESSOR
 // ==========================================================
 func BecomeTeacher(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação"})
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 
@@ -292,39 +274,28 @@ func BecomeTeacher(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "O CNPJ é obrigatório para criar uma conta de Professor."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "O CNPJ é obrigatório."})
 		return
 	}
 
 	updates := map[string]interface{}{
-		"account_type": "TEACHER",
+		"account_type": utils.RoleTeacher,
 		"cnpj":         input.CNPJ,
 	}
 
 	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a conta para Professor."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar conta."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Parabéns! Agora você é um Professor no StudFy.",
-		"account_type": "TEACHER",
-		"cnpj":         input.CNPJ,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Agora você é um Professor no StudFy."})
 }
 
 // ==========================================================
-// 🎓 VER PERFIL PÚBLICO DO PROFESSOR (A Vitrine)
+// 🎓 VER PERFIL PÚBLICO DO PROFESSOR
 // ==========================================================
 func GetTeacherProfile(c *gin.Context) {
-	viewerIDInterface, _ := c.Get("userID")
-	var viewerID uuid.UUID
-	switch v := viewerIDInterface.(type) {
-	case uuid.UUID:
-		viewerID = v
-	case string:
-		viewerID, _ = uuid.Parse(v)
-	}
+	viewerID, _ := utils.GetUserID(c)
 
 	teacherIDStr := c.Param("id")
 	teacherID, err := uuid.Parse(teacherIDStr)
@@ -335,7 +306,7 @@ func GetTeacherProfile(c *gin.Context) {
 
 	var teacher models.User
 	if err := database.DB.Select("id, full_name, nickname, bio, profile_pic, banner_pic, title, location").
-		Where("id = ? AND account_type = 'TEACHER'", teacherID).
+		Where("id = ? AND account_type = ?", teacherID, utils.RoleTeacher).
 		First(&teacher).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Professor não encontrado."})
 		return
@@ -345,8 +316,7 @@ func GetTeacherProfile(c *gin.Context) {
 	database.DB.Model(&models.Follower{}).Where("following_id = ?", teacherID).Count(&followerCount)
 
 	var isFollowing bool
-	var follow models.Follower
-	if err := database.DB.Where("follower_id = ? AND following_id = ?", viewerID, teacherID).First(&follow).Error; err == nil {
+	if err := database.DB.Where("follower_id = ? AND following_id = ?", viewerID, teacherID).First(&models.Follower{}).Error; err == nil {
 		isFollowing = true
 	}
 
@@ -380,8 +350,11 @@ func GetTeacherProfile(c *gin.Context) {
 // 🌟 SEGUIR UM PROFESSOR
 // ==========================================================
 func FollowTeacher(c *gin.Context) {
-	followerIDInterface, _ := c.Get("userID")
-	followerID, _ := uuid.Parse(followerIDInterface.(string))
+	followerID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	teacherIDStr := c.Param("id")
 	teacherID, err := uuid.Parse(teacherIDStr)
@@ -391,19 +364,19 @@ func FollowTeacher(c *gin.Context) {
 	}
 
 	if followerID == teacherID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Você não pode seguir a si mesmo."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Não pode seguir-se a si mesmo."})
 		return
 	}
 
 	var teacher models.User
-	if err := database.DB.Where("id = ? AND account_type = 'TEACHER'", teacherID).First(&teacher).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Professor não encontrado ou usuário não é um professor."})
+	if err := database.DB.Where("id = ? AND account_type = ?", teacherID, utils.RoleTeacher).First(&teacher).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Professor não encontrado."})
 		return
 	}
 
 	var existingFollow models.Follower
 	if err := database.DB.Where("follower_id = ? AND following_id = ?", followerID, teacherID).First(&existingFollow).Error; err == nil {
-		c.JSON(http.StatusOK, gin.H{"message": "Você já segue este professor."})
+		c.JSON(http.StatusOK, gin.H{"message": "Já segue este professor."})
 		return
 	}
 
@@ -413,36 +386,42 @@ func FollowTeacher(c *gin.Context) {
 	}
 	database.DB.Create(&newFollow)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Você agora está seguindo " + teacher.FullName})
+	c.JSON(http.StatusOK, gin.H{"message": "Agora está a seguir " + teacher.FullName})
 }
 
 // ==========================================================
-// 💔 DEIXAR DE SEGUIR UM PROFESSOR
+// 💔 DEIXAR DE SEGUIR
 // ==========================================================
 func UnfollowTeacher(c *gin.Context) {
-	followerIDInterface, _ := c.Get("userID")
-	followerID, _ := uuid.Parse(followerIDInterface.(string))
-	teacherID, _ := uuid.Parse(c.Param("id"))
+	followerID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
+
+	teacherIDStr := c.Param("id")
+	teacherID, err := uuid.Parse(teacherIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID inválido."})
+		return
+	}
 
 	if err := database.DB.Where("follower_id = ? AND following_id = ?", followerID, teacherID).Delete(&models.Follower{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deixar de seguir."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Você deixou de seguir este professor."})
+	c.JSON(http.StatusOK, gin.H{"message": "Deixou de seguir este professor."})
 }
 
 // ==========================================================
-// ⚙️ ATUALIZAR CONFIGURAÇÕES DO APP (Settings)
+// ⚙️ ATUALIZAR CONFIGURAÇÕES DO APP
 // ==========================================================
 func UpdateMySettings(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var input struct {
@@ -451,7 +430,7 @@ func UpdateMySettings(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos. Envie theme e push_notifications."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
@@ -463,41 +442,30 @@ func UpdateMySettings(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Configurações salvas com sucesso!",
-		"settings": gin.H{
-			"theme":              input.Theme,
-			"push_notifications": *input.PushNotifications,
-		},
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Configurações salvas!"})
 }
 
 // ==========================================================
-// ⏰ SALVAR OU CRIAR ROTINA GLOBAL (Availability Profile)
+// ⏰ SALVAR ROTINA
 // ==========================================================
 func SaveAvailabilityProfile(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var input struct {
-		Name      string `json:"name" binding:"required"`     // Ex: "Rotina Padrão"
-		Schedule  any    `json:"schedule" binding:"required"` // Aceita o Array do Front
+		Name      string `json:"name" binding:"required"`
+		Schedule  any    `json:"schedule" binding:"required"`
 		IsDefault bool   `json:"is_default"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	// Transforma o array que o Front mandou em String JSON para salvar no banco
 	scheduleJSON, _ := json.Marshal(input.Schedule)
 
 	profile := models.AvailabilityProfile{
@@ -507,7 +475,6 @@ func SaveAvailabilityProfile(c *gin.Context) {
 		IsDefault: input.IsDefault,
 	}
 
-	// Se o usuário marcou como padrão, tira o padrão dos outros
 	if input.IsDefault {
 		database.DB.Model(&models.AvailabilityProfile{}).
 			Where("user_id = ?", userID).
@@ -516,31 +483,24 @@ func SaveAvailabilityProfile(c *gin.Context) {
 
 	database.DB.Create(&profile)
 
-	c.JSON(201, gin.H{
-		"message": "Rotina salva com sucesso!",
-		"profile": profile,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Rotina salva!", "profile": profile})
 }
 
 // ==========================================================
-// ⏰ EDITAR ROTINA GLOBAL (A FUNÇÃO QUE FALTAVA! 🚀)
+// ⏰ EDITAR ROTINA
 // ==========================================================
 func UpdateAvailabilityProfile(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	profileID := c.Param("availability_id")
 
 	var input struct {
 		Name      string `json:"name"`
-		Schedule  any    `json:"schedule"` // Aceita o Array de dias modificado
+		Schedule  any    `json:"schedule"`
 		IsDefault *bool  `json:"is_default"`
 	}
 
@@ -549,7 +509,6 @@ func UpdateAvailabilityProfile(c *gin.Context) {
 		return
 	}
 
-	// 1. Verifica se a rotina existe e pertence ao aluno
 	var profile models.AvailabilityProfile
 	if err := database.DB.Where("id = ? AND user_id = ?", profileID, userID).First(&profile).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Rotina não encontrada."})
@@ -567,8 +526,6 @@ func UpdateAvailabilityProfile(c *gin.Context) {
 	}
 	if input.IsDefault != nil {
 		updates["is_default"] = *input.IsDefault
-
-		// Se ele marcou essa como Padrão, temos que tirar o Padrão de todas as outras dele
 		if *input.IsDefault {
 			database.DB.Model(&models.AvailabilityProfile{}).
 				Where("user_id = ? AND id != ?", userID, profileID).
@@ -576,11 +533,10 @@ func UpdateAvailabilityProfile(c *gin.Context) {
 		}
 	}
 
-	// 2. Salva as edições no banco
 	if err := database.DB.Model(&profile).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar rotina."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Rotina atualizada com sucesso!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Rotina atualizada!"})
 }

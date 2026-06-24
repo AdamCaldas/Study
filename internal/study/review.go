@@ -29,15 +29,14 @@ func CreateReview(c *gin.Context) {
 		return
 	}
 
-	// Cria a revisão agendada para o dia seguinte (Lógica simples de Repetição Espaçada)
 	newReview := models.Review{
 		NoteID:     parsedNoteID,
-		ReviewDate: time.Now().AddDate(0, 0, 1), // Adiciona 1 dia
+		ReviewDate: time.Now().AddDate(0, 0, 1),
 		Status:     "pendente",
 	}
 
 	if err := database.DB.Create(&newReview).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao agendar revisão"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao agendar revisão."}) // 👈 Erro blindado
 		return
 	}
 

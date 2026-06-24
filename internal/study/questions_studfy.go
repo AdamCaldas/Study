@@ -9,16 +9,15 @@ import (
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
-// Estrutura do JSON de Opções (Usada tanto aqui quanto no banco do Space)
 type QuestionOptionInput struct {
 	Letter    string `json:"letter"`
 	Text      string `json:"text"`
 	IsCorrect bool   `json:"isCorrect"`
 }
 
-// O que o Painel Admin manda para criar/editar a questão oficial
 type StudfyQuestionInput struct {
 	Title         string                `json:"title"`
 	Discipline    string                `json:"discipline"`
@@ -31,13 +30,13 @@ type StudfyQuestionInput struct {
 }
 
 // ==========================================================
-// 🎓 1. LISTAR QUESTÕES OFICIAIS (Visão App / Alunos)
+// 🎓 1. LISTAR QUESTÕES OFICIAIS
 // ==========================================================
 func ListStudfyQuestions(c *gin.Context) {
 	searchQuery := c.Query("search")
 	discipline := c.Query("discipline")
 	yearStr := c.Query("year")
-	limitStr := c.DefaultQuery("limit", "50") // Traz 50 por vez pra não travar
+	limitStr := c.DefaultQuery("limit", "50")
 
 	limit, _ := strconv.Atoi(limitStr)
 
@@ -70,7 +69,6 @@ func AdminCreateStudfyQuestion(c *gin.Context) {
 		return
 	}
 
-	// Converte o Array do Front-end pra String JSON do Banco
 	optionsBytes, _ := json.Marshal(input.Options)
 
 	newQ := models.StudfyQuestion{
@@ -97,9 +95,14 @@ func AdminCreateStudfyQuestion(c *gin.Context) {
 // ⚡ 3. MODO DEUS: EDITAR QUESTÃO OFICIAL
 // ==========================================================
 func AdminUpdateStudfyQuestion(c *gin.Context) {
-	questionID := c.Param("id")
-	var input StudfyQuestionInput
+	questionIDStr := c.Param("id")
+	parsedQuestionID, err := uuid.Parse(questionIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Questão inválido."})
+		return
+	}
 
+	var input StudfyQuestionInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
@@ -107,7 +110,7 @@ func AdminUpdateStudfyQuestion(c *gin.Context) {
 
 	optionsBytes, _ := json.Marshal(input.Options)
 
-	if err := database.DB.Model(&models.StudfyQuestion{}).Where("id = ?", questionID).Updates(map[string]interface{}{
+	if err := database.DB.Model(&models.StudfyQuestion{}).Where("id = ?", parsedQuestionID).Updates(map[string]interface{}{
 		"title":          input.Title,
 		"discipline":     input.Discipline,
 		"year":           input.Year,
@@ -128,8 +131,14 @@ func AdminUpdateStudfyQuestion(c *gin.Context) {
 // ⚡ 4. MODO DEUS: APAGAR QUESTÃO OFICIAL
 // ==========================================================
 func AdminDeleteStudfyQuestion(c *gin.Context) {
-	questionID := c.Param("id")
-	if err := database.DB.Where("id = ?", questionID).Delete(&models.StudfyQuestion{}).Error; err != nil {
+	questionIDStr := c.Param("id")
+	parsedQuestionID, err := uuid.Parse(questionIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Questão inválido."})
+		return
+	}
+
+	if err := database.DB.Where("id = ?", parsedQuestionID).Delete(&models.StudfyQuestion{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar questão."})
 		return
 	}

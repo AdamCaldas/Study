@@ -9,6 +9,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -144,30 +145,25 @@ func GenerateAutoPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, err := uuid.Parse(spaceIDStr)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "ID do Space inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido"})
 		return
 	}
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
-	default:
-		c.JSON(401, gin.H{"error": "Usuário não autenticado corretamente."})
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 
 	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
 	if input.AvailabilityID == nil {
-		c.JSON(400, gin.H{"error": "availability_id é obrigatório."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "availability_id é obrigatório."})
 		return
 	}
 
@@ -176,14 +172,14 @@ func GenerateAutoPlan(c *gin.Context) {
 	var availabilityProfile models.AvailabilityProfile
 	if err := tx.Where("id = ? AND user_id = ?", input.AvailabilityID, parsedUserID).First(&availabilityProfile).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Perfil de disponibilidade não encontrado."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Perfil de disponibilidade não encontrado."})
 		return
 	}
 
 	var dailyAvailability []DailyScheduleInput
 	if err := json.Unmarshal([]byte(availabilityProfile.Schedule), &dailyAvailability); err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao ler horários do perfil."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao ler horários do perfil."})
 		return
 	}
 
@@ -196,7 +192,7 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao criar estratégia: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar estratégia."}) // 👈 Erro blindado
 			return
 		}
 	}
@@ -229,7 +225,7 @@ func GenerateAutoPlan(c *gin.Context) {
 			}
 			if err := tx.Create(&newNb).Error; err != nil {
 				tx.Rollback()
-				c.JSON(500, gin.H{"error": "Erro ao criar caderno: " + err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar caderno."}) // 👈 Erro blindado
 				return
 			}
 
@@ -243,7 +239,7 @@ func GenerateAutoPlan(c *gin.Context) {
 			}
 			if err := tx.Create(&newPage).Error; err != nil {
 				tx.Rollback()
-				c.JSON(500, gin.H{"error": "Erro ao criar página: " + err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar página."}) // 👈 Erro blindado
 				return
 			}
 
@@ -263,7 +259,7 @@ func GenerateAutoPlan(c *gin.Context) {
 
 	if err := tx.Save(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao salvar estratégia."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar estratégia."})
 		return
 	}
 
@@ -377,7 +373,7 @@ func GenerateAutoPlan(c *gin.Context) {
 	if len(finalBlocks) > 0 {
 		if err := tx.Create(&finalBlocks).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao salvar os blocos no banco: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar os blocos no banco."}) // 👈 Erro blindado
 			return
 		}
 	}
@@ -398,13 +394,11 @@ func ListPlans(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, _ := uuid.Parse(spaceIDStr)
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy
@@ -621,18 +615,16 @@ func ListPlans(c *gin.Context) {
 func UpdateFullPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var input SuperEditPlanInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "JSON inválido: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido."})
 		return
 	}
 
@@ -641,7 +633,7 @@ func UpdateFullPlan(c *gin.Context) {
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Cronograma não encontrado."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cronograma não encontrado."})
 		return
 	}
 
@@ -666,7 +658,7 @@ func UpdateFullPlan(c *gin.Context) {
 	if len(updates) > 0 {
 		if err := tx.Model(&strategy).Updates(updates).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao atualizar estratégia: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar estratégia."}) // 👈 Erro blindado
 			return
 		}
 	}
@@ -699,14 +691,14 @@ func UpdateFullPlan(c *gin.Context) {
 
 		if err := tx.Create(&newBlocks).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao salvar a nova grade de horários."})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar a nova grade de horários."})
 			return
 		}
 	}
 
 	tx.Commit()
 
-	c.JSON(200, gin.H{"message": "Cronograma inteiro atualizado com sucesso!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Cronograma inteiro atualizado com sucesso!"})
 }
 
 // ==========================================================
@@ -714,7 +706,13 @@ func UpdateFullPlan(c *gin.Context) {
 // ==========================================================
 func ExecutePlanBlock(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
+
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	var input struct {
 		BlockID          uuid.UUID `json:"block_id"`
@@ -726,16 +724,8 @@ func ExecutePlanBlock(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "JSON inválido."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido."})
 		return
-	}
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
 	}
 
 	spaceID := uuid.MustParse(spaceIDStr)
@@ -744,7 +734,7 @@ func ExecutePlanBlock(c *gin.Context) {
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceID, userID).First(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Cronograma não encontrado."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Cronograma não encontrado."})
 		return
 	}
 
@@ -804,7 +794,7 @@ func ExecutePlanBlock(c *gin.Context) {
 
 	tx.Commit()
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"message":        "Tempo de cronograma registrado com sucesso!",
 		"actual_minutes": duration,
 	})
@@ -817,23 +807,21 @@ func CreateStudyPlan(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	var input CreatePlanBlockInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy
 	database.DB.Where("space_id = ? AND mode = 'fixed' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 	if strategy.ID == uuid.Nil {
-		c.JSON(400, gin.H{"error": "Você precisa gerar um cronograma base primeiro."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Você precisa gerar um cronograma base primeiro."})
 		return
 	}
 
@@ -847,7 +835,7 @@ func CreateStudyPlan(c *gin.Context) {
 	}
 
 	database.DB.Create(&newBlock)
-	c.JSON(201, gin.H{"message": "Bloco adicionado!", "block": newBlock})
+	c.JSON(http.StatusCreated, gin.H{"message": "Bloco adicionado!", "block": newBlock})
 }
 
 func CreateMultipleStudyPlans(c *gin.Context) {
@@ -857,13 +845,11 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&input)
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy
@@ -881,7 +867,7 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 		})
 	}
 	database.DB.Create(&blocks)
-	c.JSON(201, gin.H{"message": "Blocos salvos com sucesso!"})
+	c.JSON(http.StatusCreated, gin.H{"message": "Blocos salvos com sucesso!"})
 }
 
 func UpdateStudyPlan(c *gin.Context) {
@@ -896,29 +882,23 @@ func UpdateStudyPlan(c *gin.Context) {
 		"activity":    input.Activity,
 		"notebook_id": input.NotebookID,
 	})
-	c.JSON(200, gin.H{"message": "Bloco atualizado"})
+	c.JSON(http.StatusOK, gin.H{"message": "Bloco atualizado"})
 }
 
 func DeleteStudyPlan(c *gin.Context) {
 	blockID := c.Param("plan_id")
 	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
-	c.JSON(200, gin.H{"message": "Bloco removido"})
+	c.JSON(http.StatusOK, gin.H{"message": "Bloco removido"})
 }
 
 // ==========================================================
 // 📊 GET ANALYTICS (Geral para Ambos os Modos)
 // ==========================================================
 func GetMyStudyAnalytics(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro de autenticação"})
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 
@@ -974,18 +954,15 @@ func GetMyStudyAnalytics(c *gin.Context) {
 // ==========================================================
 // 🤖 6. AUTOFIT - ENCAIXE INTELIGENTE DOS BLOCOS CLONADOS
 // ==========================================================
-// 👇 RENOMEADO DE "GenerateAutoPlan" PARA "AutoFitPlanBlocks" PARA NÃO DAR ERRO 👇
 func AutoFitPlanBlocks(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, _ := uuid.Parse(spaceIDStr)
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy

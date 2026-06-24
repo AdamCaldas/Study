@@ -6,27 +6,14 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// ==========================================================
-// FUNÇÃO AUXILIAR: Extrai o ID do usuário com segurança
-// ==========================================================
-func getUserID(c *gin.Context) uuid.UUID {
-	userIDInterface, _ := c.Get("userID")
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		return v
-	case string:
-		parsed, _ := uuid.Parse(v)
-		return parsed
-	default:
-		return uuid.Nil
-	}
-}
+// A função auxiliar local getUserID foi REMOVIDA! Agora usamos utils.GetUserID
 
 // ==========================================================
 // 🛡️ O LEÃO DE CHÁCARA GRANULAR
@@ -42,7 +29,7 @@ func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) 
 	// 2. Tem permissão direta no Caderno?
 	var nbPerm models.NotebookPermission
 	if err := database.DB.Select("access_level").Where("notebook_id = ? AND user_id = ?", notebookID, userID).First(&nbPerm).Error; err == nil {
-		return nbPerm.AccessLevel == "EDITOR"
+		return nbPerm.AccessLevel == utils.AccessEditor // 👈 Usando a Constante!
 	}
 
 	// 3. Tem permissão geral de editor no Space?
@@ -60,13 +47,23 @@ func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) 
 type CreateNotebookInput struct {
 	Name       string `json:"name" binding:"required"`
 	ColorHex   string `json:"color_hex"`
-	Visibility string `json:"visibility"` // 👈 Adicionado para salvar Público/Privado
+	Visibility string `json:"visibility"`
 }
 
 func CreateNotebook(c *gin.Context) {
-	parsedUserID := getUserID(c)
+	// 👇 Usando a função blindada global
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	spaceIDStr := c.Param("space_id")
-	parsedSpaceID, _ := uuid.Parse(spaceIDStr)
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido"})
+		return
+	}
 
 	var space models.Space
 	isOwner := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, parsedUserID).First(&space).Error == nil
@@ -82,7 +79,7 @@ func CreateNotebook(c *gin.Context) {
 
 	var input CreateNotebookInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."}) // 👈 Erro bruto ocultado (Fase 2.1)
 		return
 	}
 
@@ -98,13 +95,13 @@ func CreateNotebook(c *gin.Context) {
 		SpaceID:     parsedSpaceID,
 		Name:        input.Name,
 		ColorHex:    input.ColorHex,
-		Visibility:  input.Visibility, // 👈 Salva no banco
-		CreatedByID: parsedUserID,     // ASSINATURA
-		UpdatedByID: parsedUserID,     // ASSINATURA
+		Visibility:  input.Visibility,
+		CreatedByID: parsedUserID, // ASSINATURA
+		UpdatedByID: parsedUserID, // ASSINATURA
 	}
 
 	if err := database.DB.Create(&newNotebook).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Caderno"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Caderno."})
 		return
 	}
 
@@ -126,9 +123,19 @@ type UpdateNotebookInput struct {
 }
 
 func UpdateNotebook(c *gin.Context) {
-	parsedUserID := getUserID(c)
+	// 👇 Usando a função blindada
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	notebookIDStr := c.Param("notebook_id")
-	parsedNotebookID, _ := uuid.Parse(notebookIDStr)
+	parsedNotebookID, err := uuid.Parse(notebookIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Caderno inválido"})
+		return
+	}
 
 	var notebook models.Notebook
 	if err := database.DB.Where("id = ?", parsedNotebookID).First(&notebook).Error; err != nil {
@@ -162,7 +169,6 @@ func UpdateNotebook(c *gin.Context) {
 		updates["visibility"] = input.Visibility
 	}
 
-	// 👇 INJETANDO OS NOVOS CAMPOS NO BANCO SE O FRONT ENVIAR!
 	if input.IsFullWidth != nil {
 		updates["is_full_width"] = *input.IsFullWidth
 	}
@@ -174,7 +180,7 @@ func UpdateNotebook(c *gin.Context) {
 	}
 
 	if err := database.DB.Model(&notebook).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar o caderno."})
 		return
 	}
 
@@ -188,12 +194,11 @@ func DeleteNotebook(c *gin.Context) {
 	notebookID := c.Param("notebook_id")
 
 	// 👇 A MÁGICA AQUI: Se o caderno estava no Ciclo de Estudos, apagamos o bloco dele!
-	// Como a tabela de Logs guarda os dados de forma independente, o Histórico do aluno NÃO é apagado!
 	database.DB.Where("notebook_id = ?", notebookID).Delete(&models.StudyBlock{})
 
 	// O GORM Cascata vai apagar as Guias e as Páginas sozinhas!
 	if err := database.DB.Where("id = ?", notebookID).Delete(&models.Notebook{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar caderno", "detalhe": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar caderno."}) // 👈 Erro bruto ocultado
 		return
 	}
 
@@ -229,7 +234,6 @@ func ListSpaceNotebooks(c *gin.Context) {
 		if notebooks[i].UnlockAt != nil && notebooks[i].UnlockAt.After(now) {
 			notebooks[i].IsLocked = true
 		}
-		// Não precisamos mais esvaziar as páginas aqui, porque elas nem foram buscadas!
 	}
 
 	c.JSON(http.StatusOK, gin.H{"notebooks": notebooks})

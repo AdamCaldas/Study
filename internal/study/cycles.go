@@ -8,6 +8,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,25 +22,20 @@ func GenerateAutoCycle(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, err := uuid.Parse(spaceIDStr)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "ID do Space inválido"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido"})
 		return
 	}
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
-	default:
-		c.JSON(401, gin.H{"error": "Usuário não autenticado corretamente."})
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não autenticado corretamente."})
 		return
 	}
 
 	var input GenerateStrategyInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."}) // 👈 Erro blindado
 		return
 	}
 
@@ -67,7 +63,7 @@ func GenerateAutoCycle(c *gin.Context) {
 		}
 		if err := tx.Create(&strategy).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro do Banco ao criar estratégia: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro do Banco ao criar estratégia."}) // 👈 Erro blindado
 			return
 		}
 	}
@@ -101,7 +97,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			}
 			if err := tx.Create(&newNb).Error; err != nil {
 				tx.Rollback()
-				c.JSON(500, gin.H{"error": "Erro ao criar caderno de " + disc.Name + ": " + err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar caderno de " + disc.Name}) // 👈 Erro blindado
 				return
 			}
 
@@ -116,7 +112,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			}
 			if err := tx.Create(&newGuide).Error; err != nil {
 				tx.Rollback()
-				c.JSON(500, gin.H{"error": "Erro ao criar guia de " + disc.Name + ": " + err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar guia de " + disc.Name}) // 👈 Erro blindado
 				return
 			}
 
@@ -132,7 +128,7 @@ func GenerateAutoCycle(c *gin.Context) {
 			}
 			if err := tx.Create(&newPage).Error; err != nil {
 				tx.Rollback()
-				c.JSON(500, gin.H{"error": "Erro ao criar página de " + disc.Name + ": " + err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar página de " + disc.Name}) // 👈 Erro blindado
 				return
 			}
 
@@ -150,7 +146,7 @@ func GenerateAutoCycle(c *gin.Context) {
 	strategy.CurrentStep = 0
 	if err := tx.Save(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(500, gin.H{"error": "Erro ao atualizar parâmetros: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar parâmetros."}) // 👈 Erro blindado
 		return
 	}
 
@@ -188,13 +184,13 @@ func GenerateAutoCycle(c *gin.Context) {
 	if len(finalBlocks) > 0 {
 		if err := tx.Create(&finalBlocks).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao salvar os blocos no banco: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar os blocos no banco."}) // 👈 Erro blindado
 			return
 		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro fatal ao confirmar transação: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro fatal ao confirmar transação."}) // 👈 Erro blindado
 		return
 	}
 
@@ -212,13 +208,11 @@ func ListCycles(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	spaceID, _ := uuid.Parse(spaceIDStr)
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy
@@ -251,11 +245,11 @@ func ListCycles(c *gin.Context) {
 				newStrategy.Blocks = newBlocks
 				strategy = newStrategy
 			} else {
-				c.JSON(200, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
+				c.JSON(http.StatusOK, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
 				return
 			}
 		} else {
-			c.JSON(200, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
+			c.JSON(http.StatusOK, gin.H{"message": "Nenhum ciclo configurado ainda", "study_cycle": nil})
 			return
 		}
 	}
@@ -336,7 +330,7 @@ func ListCycles(c *gin.Context) {
 		formattedLogs = []map[string]interface{}{}
 	}
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"analytics": gin.H{
 			"today_minutes": todayLog.TotalMinutes,
 			"today_blocks":  todayAnalyticsBlocks,
@@ -367,7 +361,13 @@ func ListCycles(c *gin.Context) {
 // ==========================================================
 func AdvanceCycleStep(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
+
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
 	var input struct {
 		ActualDuration int       `json:"actual_duration"`
@@ -377,16 +377,8 @@ func AdvanceCycleStep(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "JSON inválido."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido."})
 		return
-	}
-
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
 	}
 
 	spaceID := uuid.MustParse(spaceIDStr)
@@ -395,7 +387,7 @@ func AdvanceCycleStep(c *gin.Context) {
 	var strategy models.StudyStrategy
 	if err := tx.Preload("Blocks").Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceID, userID).First(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Ciclo não encontrado."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Ciclo não encontrado."})
 		return
 	}
 
@@ -457,7 +449,7 @@ func AdvanceCycleStep(c *gin.Context) {
 
 	tx.Commit()
 
-	c.JSON(200, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"message":          "Tempo e dívidas acumulados com sucesso!",
 		"actual_minutes":   input.ActualDuration,
 		"missing_minutes":  missing,
@@ -478,23 +470,21 @@ func CreateCycleBlock(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	var input CreateCycleBlockInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var strategy models.StudyStrategy
 	database.DB.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy)
 	if strategy.ID == uuid.Nil {
-		c.JSON(400, gin.H{"error": "Você precisa gerar um ciclo base primeiro."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Você precisa gerar um ciclo base primeiro."})
 		return
 	}
 
@@ -505,7 +495,7 @@ func CreateCycleBlock(c *gin.Context) {
 	}
 
 	database.DB.Create(&newBlock)
-	c.JSON(201, gin.H{"message": "Card adicionado ao ciclo!", "block": newBlock})
+	c.JSON(http.StatusCreated, gin.H{"message": "Card adicionado ao ciclo!", "block": newBlock})
 }
 
 func UpdateCycleBlock(c *gin.Context) {
@@ -517,13 +507,13 @@ func UpdateCycleBlock(c *gin.Context) {
 		"activity":    input.Activity,
 		"notebook_id": input.NotebookID,
 	})
-	c.JSON(200, gin.H{"message": "Card atualizado"})
+	c.JSON(http.StatusOK, gin.H{"message": "Card atualizado"})
 }
 
 func DeleteCycleBlock(c *gin.Context) {
 	blockID := c.Param("block_id")
 	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
-	c.JSON(200, gin.H{"message": "Card removido"})
+	c.JSON(http.StatusOK, gin.H{"message": "Card removido"})
 }
 
 // ==========================================================
@@ -552,18 +542,16 @@ type SuperEditCycleInput struct {
 func UpdateFullCycle(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 
-	userIDInterface, _ := c.Get("userID")
-	var parsedUserID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		parsedUserID = v
-	case string:
-		parsedUserID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID aplicada!
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
 	}
 
 	var input SuperEditCycleInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "JSON inválido: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "JSON inválido."}) // 👈 Erro blindado
 		return
 	}
 
@@ -572,7 +560,7 @@ func UpdateFullCycle(c *gin.Context) {
 	var strategy models.StudyStrategy
 	if err := tx.Where("space_id = ? AND mode = 'adaptive' AND created_by_id = ?", spaceIDStr, parsedUserID).First(&strategy).Error; err != nil {
 		tx.Rollback()
-		c.JSON(404, gin.H{"error": "Ciclo não encontrado."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Ciclo não encontrado."})
 		return
 	}
 
@@ -600,7 +588,7 @@ func UpdateFullCycle(c *gin.Context) {
 	if len(updates) > 0 {
 		if err := tx.Model(&strategy).Updates(updates).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao atualizar estratégia: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar estratégia."}) // 👈 Erro blindado
 			return
 		}
 	}
@@ -656,12 +644,12 @@ func UpdateFullCycle(c *gin.Context) {
 
 		if err := tx.Create(&newBlocks).Error; err != nil {
 			tx.Rollback()
-			c.JSON(500, gin.H{"error": "Erro ao salvar a nova ordem dos cards."})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar a nova ordem dos cards."})
 			return
 		}
 	}
 
 	tx.Commit()
 
-	c.JSON(200, gin.H{"message": "Ciclo inteiro atualizado com sucesso!"})
+	c.JSON(http.StatusOK, gin.H{"message": "Ciclo inteiro atualizado com sucesso!"})
 }

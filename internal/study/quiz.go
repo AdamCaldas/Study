@@ -7,6 +7,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -30,15 +31,18 @@ type CreateQuizInput struct {
 // 📝 CRIAR SIMULADO E PERGUNTAS
 // ==========================================================
 func CreateQuiz(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	var input CreateQuizInput
-
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados do Quiz inválidos"})
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
 		return
 	}
 
-	parsedSpaceID, _ := uuid.Parse(spaceID)
+	var input CreateQuizInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados do Quiz inválidos."})
+		return
+	}
 
 	// Monta o Quiz
 	newQuiz := models.Quiz{
@@ -65,7 +69,7 @@ func CreateQuiz(c *gin.Context) {
 
 	// Salva TUDO no banco de dados de uma vez (O GORM é inteligente e salva as relações)
 	if err := database.DB.Create(&newQuiz).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o Quiz", "detalhe": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o Simulado."}) // 👈 Erro bruto ocultado!
 		return
 	}
 
@@ -76,11 +80,16 @@ func CreateQuiz(c *gin.Context) {
 // 📋 LISTAR SIMULADOS DA TURMA
 // ==========================================================
 func ListSpaceQuizzes(c *gin.Context) {
-	spaceID := c.Param("space_id")
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
 	var quizzes []models.Quiz
 	// O Preload traz as perguntas embutidas no JSON
-	database.DB.Preload("Questions").Where("space_id = ?", spaceID).Find(&quizzes)
+	database.DB.Preload("Questions").Where("space_id = ?", parsedSpaceID).Find(&quizzes)
 
 	now := time.Now()
 	for i := range quizzes {
@@ -98,18 +107,22 @@ func ListSpaceQuizzes(c *gin.Context) {
 // ⚔️ SUBMETER PROVA E CORREÇÃO AUTOMÁTICA
 // ==========================================================
 func SubmitQuiz(c *gin.Context) {
-	quizID := c.Param("quiz_id")
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	quizIDStr := c.Param("quiz_id")
+	parsedQuizID, err := uuid.Parse(quizIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Quiz inválido."})
+		return
+	}
+
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var quiz models.Quiz
-	if err := database.DB.Preload("Questions").Where("id = ?", quizID).First(&quiz).Error; err != nil {
+	if err := database.DB.Preload("Questions").Where("id = ?", parsedQuizID).First(&quiz).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Simulado não encontrado."})
 		return
 	}
@@ -163,7 +176,12 @@ func SubmitQuiz(c *gin.Context) {
 // ✍️ CORREÇÃO MANUAL DO PROFESSOR (Para questões abertas)
 // ==========================================================
 func GradeQuizManual(c *gin.Context) {
-	resultID := c.Param("result_id")
+	resultIDStr := c.Param("result_id")
+	parsedResultID, err := uuid.Parse(resultIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Resultado inválido."})
+		return
+	}
 
 	var input struct {
 		ExtraPoints float64 `json:"extra_points" binding:"required"`
@@ -174,7 +192,7 @@ func GradeQuizManual(c *gin.Context) {
 	}
 
 	var result models.QuizResult
-	if err := database.DB.Where("id = ?", resultID).First(&result).Error; err != nil {
+	if err := database.DB.Where("id = ?", parsedResultID).First(&result).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Resultado não encontrado."})
 		return
 	}
@@ -191,18 +209,22 @@ func GradeQuizManual(c *gin.Context) {
 // 🚨 ALERTA ANTI-COLA
 // ==========================================================
 func ReportCheatAttempt(c *gin.Context) {
-	quizID := c.Param("quiz_id")
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	quizIDStr := c.Param("quiz_id")
+	parsedQuizID, err := uuid.Parse(quizIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Quiz inválido."})
+		return
+	}
+
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var quiz models.Quiz
-	database.DB.Select("space_id").Where("id = ?", quizID).First(&quiz)
+	database.DB.Select("space_id").Where("id = ?", parsedQuizID).First(&quiz)
 
 	cheatLog := models.ActivityLog{
 		SpaceID: quiz.SpaceID,
@@ -218,18 +240,22 @@ func ReportCheatAttempt(c *gin.Context) {
 // 🎓 EMISSÃO DE CERTIFICADOS
 // ==========================================================
 func ClaimCertificate(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
+	// 👇 Limpeza do ID aplicada!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var existingCert models.Certificate
-	if err := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&existingCert).Error; err == nil {
+	if err := database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).First(&existingCert).Error; err == nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message":     "Você já possui este certificado!",
 			"certificate": existingCert,
@@ -238,7 +264,7 @@ func ClaimCertificate(c *gin.Context) {
 	}
 
 	var results []models.QuizResult
-	database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).Find(&results)
+	database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).Find(&results)
 
 	if len(results) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Você precisa fazer as provas antes de pedir o certificado."})
@@ -271,7 +297,7 @@ func ClaimCertificate(c *gin.Context) {
 	}
 
 	newCert := models.Certificate{
-		SpaceID:      uuid.MustParse(spaceID),
+		SpaceID:      parsedSpaceID,
 		UserID:       userID,
 		AverageScore: average,
 	}

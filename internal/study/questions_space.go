@@ -6,6 +6,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -18,7 +19,7 @@ type SpaceQuestionInput struct {
 	QuestionText  string                `json:"question_text" binding:"required"`
 	Points        int                   `json:"points"`
 	CorrectAnswer string                `json:"correct_answer"`
-	GroupID       string                `json:"group_id"` // 👈 A pasta do Edital!
+	GroupID       string                `json:"group_id"`
 	Options       []QuestionOptionInput `json:"options"`
 	QuestionType  string                `json:"question_type"`
 }
@@ -28,14 +29,17 @@ type SpaceQuestionInput struct {
 // ==========================================================
 func CreateSpaceQuestion(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var input SpaceQuestionInput
@@ -47,7 +51,7 @@ func CreateSpaceQuestion(c *gin.Context) {
 	optionsBytes, _ := json.Marshal(input.Options)
 
 	newQuestion := models.SpaceQuestion{
-		SpaceID:       uuid.MustParse(spaceIDStr),
+		SpaceID:       parsedSpaceID,
 		CreatedByID:   userID,
 		Title:         input.Title,
 		Discipline:    input.Discipline,
@@ -58,7 +62,7 @@ func CreateSpaceQuestion(c *gin.Context) {
 		GroupID:       input.GroupID,
 		Options:       string(optionsBytes),
 		QuestionType:  input.QuestionType,
-		Source:        "CUSTOM", // Criada na mão
+		Source:        "CUSTOM",
 	}
 
 	if err := database.DB.Create(&newQuestion).Error; err != nil {
@@ -74,9 +78,15 @@ func CreateSpaceQuestion(c *gin.Context) {
 // ==========================================================
 func ListSpaceQuestions(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	groupID := c.Query("group_id") // Filtro opcional para puxar só de um Edital específico
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
-	query := database.DB.Where("space_id = ?", spaceIDStr)
+	groupID := c.Query("group_id")
+
+	query := database.DB.Where("space_id = ?", parsedSpaceID)
 
 	if groupID != "" {
 		query = query.Where("group_id = ?", groupID)
@@ -93,19 +103,22 @@ func ListSpaceQuestions(c *gin.Context) {
 // ==========================================================
 func CloneStudfyQuestion(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	// 👇 Limpeza do ID!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var input struct {
 		StudfyQuestionID uuid.UUID `json:"studfy_question_id" binding:"required"`
-		GroupID          string    `json:"group_id"` // Opcional: já clona direto pra dentro de um edital
+		GroupID          string    `json:"group_id"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -113,16 +126,14 @@ func CloneStudfyQuestion(c *gin.Context) {
 		return
 	}
 
-	// 1. Busca a questão original oficial
 	var original models.StudfyQuestion
 	if err := database.DB.Where("id = ?", input.StudfyQuestionID).First(&original).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Questão oficial não encontrada."})
 		return
 	}
 
-	// 2. Cria a cópia exata para a Turma (Space)
 	clonedQuestion := models.SpaceQuestion{
-		SpaceID:       uuid.MustParse(spaceIDStr),
+		SpaceID:       parsedSpaceID,
 		CreatedByID:   userID,
 		Title:         original.Title,
 		Discipline:    original.Discipline,
@@ -133,7 +144,7 @@ func CloneStudfyQuestion(c *gin.Context) {
 		Options:       original.Options,
 		QuestionType:  original.QuestionType,
 		GroupID:       input.GroupID,
-		Source:        "CLONED", // Marca que foi uma cópia!
+		Source:        "CLONED",
 	}
 
 	if err := database.DB.Create(&clonedQuestion).Error; err != nil {
@@ -148,8 +159,14 @@ func CloneStudfyQuestion(c *gin.Context) {
 // ✏️ 4. EDITAR QUESTÃO DA TURMA
 // ==========================================================
 func UpdateSpaceQuestion(c *gin.Context) {
-	questionID := c.Param("question_id")
+	questionIDStr := c.Param("question_id")
 	spaceIDStr := c.Param("space_id")
+
+	parsedQuestionID, err := uuid.Parse(questionIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Questão inválido."})
+		return
+	}
 
 	var input SpaceQuestionInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -159,7 +176,7 @@ func UpdateSpaceQuestion(c *gin.Context) {
 
 	optionsBytes, _ := json.Marshal(input.Options)
 
-	if err := database.DB.Model(&models.SpaceQuestion{}).Where("id = ? AND space_id = ?", questionID, spaceIDStr).Updates(map[string]interface{}{
+	if err := database.DB.Model(&models.SpaceQuestion{}).Where("id = ? AND space_id = ?", parsedQuestionID, spaceIDStr).Updates(map[string]interface{}{
 		"title":          input.Title,
 		"discipline":     input.Discipline,
 		"year":           input.Year,
@@ -181,10 +198,16 @@ func UpdateSpaceQuestion(c *gin.Context) {
 // 🗑️ 5. APAGAR QUESTÃO DA TURMA
 // ==========================================================
 func DeleteSpaceQuestion(c *gin.Context) {
-	questionID := c.Param("question_id")
+	questionIDStr := c.Param("question_id")
 	spaceIDStr := c.Param("space_id")
 
-	if err := database.DB.Where("id = ? AND space_id = ?", questionID, spaceIDStr).Delete(&models.SpaceQuestion{}).Error; err != nil {
+	parsedQuestionID, err := uuid.Parse(questionIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Questão inválido."})
+		return
+	}
+
+	if err := database.DB.Where("id = ? AND space_id = ?", parsedQuestionID, spaceIDStr).Delete(&models.SpaceQuestion{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar questão."})
 		return
 	}

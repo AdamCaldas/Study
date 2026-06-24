@@ -6,6 +6,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -22,10 +23,15 @@ type CreatePageInput struct {
 }
 
 func CreatePage(c *gin.Context) {
-	parsedUserID := getUserID(c)
+	// 👇 Usando a função blindada global
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	guideIDStr := c.Param("guide_id") // 👈 A mágica: Lê da Guia e não do Caderno
 	parsedGuideID, err := uuid.Parse(guideIDStr)
-
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
 		return
@@ -47,7 +53,7 @@ func CreatePage(c *gin.Context) {
 
 	var input CreatePageInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."}) // 👈 Erro bruto ocultado (Fase 2.1)
 		return
 	}
 
@@ -71,7 +77,7 @@ func CreatePage(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&newPage).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Página"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Página."})
 		return
 	}
 
@@ -83,10 +89,16 @@ func CreatePage(c *gin.Context) {
 // ==========================================================
 func ListPagesByGuide(c *gin.Context) {
 	guideIDStr := c.Param("guide_id")
+	parsedGuideID, err := uuid.Parse(guideIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
+		return
+	}
+
 	var pages []models.Page
 
 	// Puxa as páginas dessa guia específica, em ordem
-	database.DB.Where("guide_id = ?", guideIDStr).Order("\"order\" asc").Find(&pages)
+	database.DB.Where("guide_id = ?", parsedGuideID).Order("\"order\" asc").Find(&pages)
 	c.JSON(http.StatusOK, gin.H{"pages": pages})
 }
 
@@ -101,11 +113,22 @@ type UpdatePageInput struct {
 }
 
 func UpdatePage(c *gin.Context) {
-	parsedUserID := getUserID(c)
+	// 👇 Usando a função blindada
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	pageIDStr := c.Param("page_id")
+	parsedPageID, err := uuid.Parse(pageIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Página inválido"})
+		return
+	}
 
 	var page models.Page
-	if err := database.DB.Where("id = ?", pageIDStr).First(&page).Error; err != nil {
+	if err := database.DB.Where("id = ?", parsedPageID).First(&page).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Página não encontrada"})
 		return
 	}
@@ -120,7 +143,7 @@ func UpdatePage(c *gin.Context) {
 
 	var input UpdatePageInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."}) // 👈 Erro bruto ocultado
 		return
 	}
 
@@ -142,7 +165,7 @@ func UpdatePage(c *gin.Context) {
 	}
 
 	if err := database.DB.Model(&page).Updates(updates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro do Banco ao atualizar página: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a página."}) // 👈 Erro bruto ocultado
 		return
 	}
 
@@ -153,8 +176,14 @@ func UpdatePage(c *gin.Context) {
 // 3️⃣ REORDER E DELETE DE PÁGINAS
 // ==========================================================
 func DeletePage(c *gin.Context) {
-	pageID := c.Param("page_id")
-	if err := database.DB.Where("id = ?", pageID).Delete(&models.Page{}).Error; err != nil {
+	pageIDStr := c.Param("page_id")
+	parsedPageID, err := uuid.Parse(pageIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Página inválido"})
+		return
+	}
+
+	if err := database.DB.Where("id = ?", parsedPageID).Delete(&models.Page{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar página"})
 		return
 	}
@@ -177,9 +206,16 @@ func ReorderPages(c *gin.Context) {
 
 	tx := database.DB.Begin()
 	for _, p := range req.Pages {
-		if err := tx.Model(&models.Page{}).Where("id = ?", p.PageID).Update("order", p.Order).Error; err != nil {
+		parsedID, err := uuid.Parse(p.PageID)
+		if err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao reordenar"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ID de página inválido na lista."})
+			return
+		}
+
+		if err := tx.Model(&models.Page{}).Where("id = ?", parsedID).Update("order", p.Order).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao reordenar as páginas."})
 			return
 		}
 	}

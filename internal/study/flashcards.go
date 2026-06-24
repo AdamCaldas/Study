@@ -6,6 +6,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import global adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -32,14 +33,17 @@ type CreateFlashcardInput struct {
 // ==========================================================
 func CreateFlashcard(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
-	userIDInterface, _ := c.Get("userID")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
-	var userID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userID = v
-	case string:
-		userID, _ = uuid.Parse(v)
+	// 👇 Extração de ID limpa e segura!
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var input CreateFlashcardInput
@@ -75,7 +79,7 @@ func CreateFlashcard(c *gin.Context) {
 		}
 	} else if input.SaveAsSpaceQuestion {
 		newSpaceQ := models.SpaceQuestion{
-			SpaceID:       uuid.MustParse(spaceIDStr),
+			SpaceID:       parsedSpaceID,
 			CreatedByID:   userID,
 			Title:         input.Title,
 			Discipline:    input.Category,
@@ -91,7 +95,7 @@ func CreateFlashcard(c *gin.Context) {
 	}
 
 	newCard := models.Flashcard{
-		SpaceID:     uuid.MustParse(spaceIDStr),
+		SpaceID:     parsedSpaceID,
 		CreatedByID: userID,
 		GroupID:     input.GroupID,
 		Title:       input.Title,
@@ -116,7 +120,12 @@ func CreateFlashcard(c *gin.Context) {
 // 📋 2. LISTAR FLASHCARDS (O Motor de Filtros Completo)
 // ==========================================================
 func ListFlashcards(c *gin.Context) {
-	spaceID := c.Param("space_id")
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
 
 	// Todos os Filtros que o Mayan pode usar!
 	groupID := c.Query("group_id")
@@ -125,7 +134,7 @@ func ListFlashcards(c *gin.Context) {
 	tag := c.Query("tag") // 👈 Filtro por Tag (Ex: ?tag=CESPE)
 	searchQuery := c.Query("search")
 
-	query := database.DB.Preload("Creator").Where("space_id = ?", spaceID)
+	query := database.DB.Preload("Creator").Where("space_id = ?", parsedSpaceID)
 
 	if groupID != "" {
 		query = query.Where("group_id = ?", groupID)
@@ -154,16 +163,25 @@ func ListFlashcards(c *gin.Context) {
 // ✏️ 3. EDITAR FLASHCARD
 // ==========================================================
 func UpdateFlashcard(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	cardID := c.Param("card_id")
-	userIDInterface, _ := c.Get("userID")
+	spaceIDStr := c.Param("space_id")
+	cardIDStr := c.Param("card_id")
 
-	var playerID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		playerID = v
-	case string:
-		playerID, _ = uuid.Parse(v)
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
+	parsedCardID, err := uuid.Parse(cardIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Flashcard inválido."})
+		return
+	}
+
+	playerID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var input CreateFlashcardInput
@@ -173,10 +191,10 @@ func UpdateFlashcard(c *gin.Context) {
 	}
 
 	var space models.Space
-	database.DB.Where("id = ?", spaceID).First(&space)
+	database.DB.Where("id = ?", parsedSpaceID).First(&space)
 
 	var card models.Flashcard
-	if err := database.DB.Where("id = ? AND space_id = ?", cardID, spaceID).First(&card).Error; err != nil {
+	if err := database.DB.Where("id = ? AND space_id = ?", parsedCardID, parsedSpaceID).First(&card).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Flashcard não encontrado."})
 		return
 	}
@@ -191,7 +209,7 @@ func UpdateFlashcard(c *gin.Context) {
 		tagsStr = card.Tags // Mantém a antiga se não mandar nova
 	}
 
-	database.DB.Model(&card).Updates(map[string]interface{}{
+	if err := database.DB.Model(&card).Updates(map[string]interface{}{
 		"title":        input.Title,
 		"group_id":     input.GroupID,
 		"category":     input.Category,
@@ -200,7 +218,10 @@ func UpdateFlashcard(c *gin.Context) {
 		"front":        input.Front,
 		"back":         input.Back,
 		"hint":         input.Hint,
-	})
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar flashcard."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Flashcard atualizado!"})
 }
@@ -209,23 +230,32 @@ func UpdateFlashcard(c *gin.Context) {
 // 🗑️ 4. APAGAR FLASHCARD
 // ==========================================================
 func DeleteFlashcard(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	cardID := c.Param("card_id")
-	userIDInterface, _ := c.Get("userID")
+	spaceIDStr := c.Param("space_id")
+	cardIDStr := c.Param("card_id")
 
-	var playerID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		playerID = v
-	case string:
-		playerID, _ = uuid.Parse(v)
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
+	parsedCardID, err := uuid.Parse(cardIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Flashcard inválido."})
+		return
+	}
+
+	playerID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado."})
+		return
 	}
 
 	var space models.Space
-	database.DB.Where("id = ?", spaceID).First(&space)
+	database.DB.Where("id = ?", parsedSpaceID).First(&space)
 
 	var card models.Flashcard
-	if err := database.DB.Where("id = ? AND space_id = ?", cardID, spaceID).First(&card).Error; err != nil {
+	if err := database.DB.Where("id = ? AND space_id = ?", parsedCardID, parsedSpaceID).First(&card).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Flashcard não encontrado."})
 		return
 	}

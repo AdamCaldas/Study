@@ -5,6 +5,7 @@ import (
 
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 Import adicionado
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,7 +30,13 @@ type GuideInput struct {
 // ==========================================================
 func CreateGuide(c *gin.Context) {
 	notebookID := c.Param("notebook_id")
-	userIDInterface, _ := c.Get("userID")
+
+	// 👇 Uma única linha elegante substituindo aquele bloco switch gigante!
+	userUUID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
 
 	var req GuideInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -43,14 +50,6 @@ func CreateGuide(c *gin.Context) {
 		return
 	}
 
-	var userUUID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		userUUID, _ = uuid.Parse(v)
-	}
-
 	guide := models.Guide{
 		NotebookID:       notebookUUID,
 		ParentGuideID:    req.ParentGuideID,
@@ -59,8 +58,8 @@ func CreateGuide(c *gin.Context) {
 		Icon:             req.Icon,
 		ColorHex:         req.ColorHex,
 		Order:            req.Order,
-		Orientation:      req.Orientation, // 👈 Salvando a orientação
-		PageSize:         req.PageSize,    // 👈 Salvando o tamanho (A4, etc)
+		Orientation:      req.Orientation,
+		PageSize:         req.PageSize,
 		CustomDimensions: req.CustomDimensions,
 		CreatedByID:      userUUID,
 		UpdatedByID:      userUUID,
@@ -79,7 +78,13 @@ func CreateGuide(c *gin.Context) {
 // ==========================================================
 func UpdateGuide(c *gin.Context) {
 	guideID := c.Param("guide_id")
-	userIDInterface, _ := c.Get("userID")
+
+	// 👇 Limpeza aqui também!
+	userUUID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
 
 	var req GuideInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -91,14 +96,6 @@ func UpdateGuide(c *gin.Context) {
 	if err := database.DB.Where("id = ?", guideID).First(&guide).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Guia não encontrada"})
 		return
-	}
-
-	var userUUID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		userUUID = v
-	case string:
-		userUUID, _ = uuid.Parse(v)
 	}
 
 	// Atualiza os dados normais e os de impressão!

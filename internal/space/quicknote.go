@@ -1,10 +1,10 @@
 package space
 
 import (
-	"fmt"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,12 +17,23 @@ type CreateQuickNoteInput struct {
 }
 
 func CreateQuickNote(c *gin.Context) {
-	userID, _ := c.Get("userID")
-	spaceID := c.Param("space_id")
+	// Puxa o ID do usuário de forma segura
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 
-	// 1. Verifica se o usuário tem acesso a esse Space
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido"})
+		return
+	}
+
+	// 1. Verifica se o utilizador tem acesso a esse Space (Garantindo que compara UUID com UUID)
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err != nil {
+	if err := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, userID).First(&space).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Space não encontrado ou acesso negado"})
 		return
 	}
@@ -38,8 +49,6 @@ func CreateQuickNote(c *gin.Context) {
 		input.Color = "#FFF9C4" // Cor de post-it amarelo clarinho padrão
 	}
 
-	parsedSpaceID, _ := uuid.Parse(spaceID)
-
 	// 3. Monta e salva a nota
 	newNote := models.QuickNote{
 		SpaceID: parsedSpaceID,
@@ -49,51 +58,50 @@ func CreateQuickNote(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&newNote).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar Nota Rápida"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar nota"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Nota rápida criada com sucesso!",
-		"note":    newNote,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Nota criada!", "note": newNote})
 }
 
-// ListQuickNotes - Lista as notas rápidas (post-its) do Space
-func ListQuickNotes(c *gin.Context) {
-	spaceID := c.Param("space_id")
-
-	// 1. Pega o ID do utilizador logado
-	userIDContext, _ := c.Get("userID")
-	userIDStr := fmt.Sprintf("%v", userIDContext)
-	userID, err := uuid.Parse(userIDStr)
+func ListSpaceNotes(c *gin.Context) {
+	userID, err := utils.GetUserID(c)
 	if err != nil {
-		c.JSON(400, gin.H{"error": "ID de utilizador inválido"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
 		return
 	}
 
-	// 2. CHECAGEM DE SEGURANÇA (O Leão de Chácara)
+	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido"})
+		return
+	}
+
+	// 1. É o dono?
 	var space models.Space
-	var permission models.SpacePermission
+	isOwner := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, userID).First(&space).Error == nil
 
-	isOwner := database.DB.Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error == nil
-	isGuest := database.DB.Where("space_id = ? AND user_id = ?", spaceID, userID).First(&permission).Error == nil
+	// 2. É convidado?
+	var perm models.SpacePermission
+	isGuest := database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).First(&perm).Error == nil
 
-	// Se não for dono e não for convidado, BLOQUEIA!
+	// LEÃO DE CHÁCARA: SE NÃO É DONO E NÃO É CONVIDADO, BLOQUEIA!
 	if !isOwner && !isGuest {
-		c.JSON(403, gin.H{"error": "Acesso Negado: Você não tem permissão para ver as Notas deste Space."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Acesso Negado: Não tem permissão para ver as Notas deste Space."})
 		return
 	}
 
 	// 3. BUSCA AS NOTAS (Se passou da segurança, liberta a leitura)
 	var notes []models.QuickNote
-	if err := database.DB.Where("space_id = ?", spaceID).Find(&notes).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao carregar as notas", "detalhe": err.Error()})
+	if err := database.DB.Where("space_id = ?", parsedSpaceID).Find(&notes).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao carregar as notas"})
 		return
 	}
 
 	// Devolve as notas para o Front-end
-	c.JSON(200, gin.H{"notes": notes})
+	c.JSON(http.StatusOK, gin.H{"quick_notes": notes})
 }
 
 type UpdateQuickNoteInput struct {
@@ -103,29 +111,42 @@ type UpdateQuickNoteInput struct {
 }
 
 func UpdateQuickNote(c *gin.Context) {
-	noteID := c.Param("note_id")
-	var input UpdateQuickNoteInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos"})
+	noteIDStr := c.Param("note_id")
+	parsedNoteID, err := uuid.Parse(noteIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da nota inválido"})
 		return
 	}
 
-	if err := database.DB.Model(&models.QuickNote{}).Where("id = ?", noteID).Updates(models.QuickNote{
+	var input UpdateQuickNoteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos"})
+		return
+	}
+
+	if err := database.DB.Model(&models.QuickNote{}).Where("id = ?", parsedNoteID).Updates(models.QuickNote{
 		Title:   input.Title,
 		Content: input.Content,
 		Color:   input.Color,
 	}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao atualizar nota", "detalhe": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a nota"})
 		return
 	}
-	c.JSON(200, gin.H{"message": "Nota atualizada!"})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Nota atualizada!"})
 }
 
 func DeleteQuickNote(c *gin.Context) {
-	noteID := c.Param("note_id")
-	if err := database.DB.Where("id = ?", noteID).Delete(&models.QuickNote{}).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao apagar nota", "detalhe": err.Error()})
+	noteIDStr := c.Param("note_id")
+	parsedNoteID, err := uuid.Parse(noteIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da nota inválido"})
 		return
 	}
-	c.JSON(200, gin.H{"message": "Nota apagada!"})
+
+	if err := database.DB.Where("id = ?", parsedNoteID).Delete(&models.QuickNote{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar a nota"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Nota apagada!"})
 }

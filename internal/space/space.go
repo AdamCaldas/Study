@@ -974,14 +974,3 @@ func GetSpaceDetails(c *gin.Context) {
 		"my_permissions": myPermissions, // 👈 Mayan usa isso pra mostrar/esconder botões!
 	})
 }
-
-// ==========================================================
-// 📝 2. GET /spaces/:space_id/notes (Aba de Notas Rápidas)
-// ==========================================================
-func ListSpaceNotes(c *gin.Context) {
-	spaceID := c.Param("space_id")
-	var quickNotes []models.QuickNote
-	database.DB.Where("space_id = ?", spaceID).Find(&quickNotes)
-
-	c.JSON(http.StatusOK, gin.H{"quick_notes": quickNotes})
-}

@@ -45,11 +45,10 @@ func Register(c *gin.Context) {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criptografar senha"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao processar a palavra-passe."})
 		return
 	}
 
-	// 🔒 Volta a ser FALSE, ele precisa verificar o e-mail agora
 	newUser := models.User{
 		FullName:        input.FullName,
 		Email:           input.Email,
@@ -57,12 +56,14 @@ func Register(c *gin.Context) {
 		Password:        string(hashedPassword),
 		IsEmailVerified: false,
 	}
-	database.DB.Create(&newUser)
 
-	// 🎲 Gera código de 6 dígitos
+	if err := database.DB.Create(&newUser).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar conta no sistema."})
+		return
+	}
+
 	code := fmt.Sprintf("%06d", rand.Intn(1000000))
 
-	// Salva no banco de dados com validade de 10 minutos
 	verificationCode := models.VerificationCode{
 		Email:     newUser.Email,
 		Code:      code,
@@ -70,11 +71,10 @@ func Register(c *gin.Context) {
 	}
 	database.DB.Create(&verificationCode)
 
-	// 📧 Dispara o e-mail (usando seu utils que já tá pronto!)
 	go utils.SendVerificationEmail(newUser.Email, newUser.FullName, code)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Conta criada! Verifique seu e-mail para ativar a conta.",
+		"message": "Conta criada! Verifique o seu e-mail para ativar a conta.",
 		"email":   newUser.Email,
 	})
 }
@@ -105,11 +105,10 @@ func VerifyEmailCode(c *gin.Context) {
 		return
 	}
 
-	// 🔓 Ativa a conta do usuário
 	database.DB.Model(&models.User{}).Where("email = ?", input.Email).Update("is_email_verified", true)
-	database.DB.Delete(&verification) // Limpa o código usado
+	database.DB.Delete(&verification)
 
-	c.JSON(http.StatusOK, gin.H{"message": "E-mail verificado com sucesso! Você já pode fazer login."})
+	c.JSON(http.StatusOK, gin.H{"message": "E-mail verificado com sucesso! Já pode fazer login."})
 }
 
 // ==========================================================
@@ -124,26 +123,25 @@ func Login(c *gin.Context) {
 	var input LoginInput
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
 	var user models.User
 
 	if err := database.DB.Where("email = ?", input.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "E-mail ou senha incorretos"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "E-mail ou palavra-passe incorretos"})
 		return
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password))
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "E-mail ou senha incorretos"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "E-mail ou palavra-passe incorretos"})
 		return
 	}
 
-	// 🔒 Religa a Trava de Verificação
 	if !user.IsEmailVerified {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Sua conta ainda não foi verificada. Cheque seu e-mail."})
+		c.JSON(http.StatusForbidden, gin.H{"error": "A sua conta ainda não foi verificada. Verifique o seu e-mail."})
 		return
 	}
 
@@ -156,7 +154,7 @@ func Login(c *gin.Context) {
 	tokenString, err := token.SignedString([]byte(secret))
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar o token de acesso"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar o token de acesso."})
 		return
 	}
 
@@ -186,7 +184,7 @@ func ForgotPassword(c *gin.Context) {
 
 	var user models.User
 	if err := database.DB.Where("email = ?", input.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusOK, gin.H{"message": "Se o e-mail existir, você receberá um link."})
+		c.JSON(http.StatusOK, gin.H{"message": "Se o e-mail existir, receberá um link."})
 		return
 	}
 
@@ -207,7 +205,7 @@ func ForgotPassword(c *gin.Context) {
 
 	go utils.SendPasswordResetEmail(user.Email, user.FullName, resetLink)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Se o e-mail existir, você receberá um link."})
+	c.JSON(http.StatusOK, gin.H{"message": "Se o e-mail existir, receberá um link."})
 }
 
 // ==========================================================
@@ -244,7 +242,7 @@ func ResetPassword(c *gin.Context) {
 }
 
 // ==========================================================
-// 6. 🌐 LOGIN/CADASTRO COM GOOGLE (O Passo 2)
+// 6. 🌐 LOGIN/CADASTRO COM GOOGLE
 // ==========================================================
 type GoogleLoginInput struct {
 	Token string `json:"token" binding:"required"`
@@ -257,14 +255,12 @@ func GoogleAuth(c *gin.Context) {
 		return
 	}
 
-	// 1. Valida o Token direto com os servidores do Google (Segurança Máxima)
 	payload, err := idtoken.Validate(context.Background(), input.Token, "")
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token do Google inválido ou expirado."})
 		return
 	}
 
-	// 2. Extrai os dados que o Google devolveu
 	email := payload.Claims["email"].(string)
 	name := payload.Claims["name"].(string)
 	picture := ""
@@ -272,12 +268,8 @@ func GoogleAuth(c *gin.Context) {
 		picture = pic.(string)
 	}
 
-	// 3. Procura no banco de dados se esse usuário já existe
 	var user models.User
 	if err := database.DB.Where("email = ?", email).First(&user).Error; err != nil {
-		// 🚨 USUÁRIO NÃO EXISTE: Vamos cadastrar ele automaticamente!
-
-		// Gera uma senha aleatória absurda só pro banco não reclamar
 		randomPassword, _ := bcrypt.GenerateFromPassword([]byte(uuid.New().String()), bcrypt.DefaultCost)
 
 		user = models.User{
@@ -285,8 +277,8 @@ func GoogleAuth(c *gin.Context) {
 			Email:           email,
 			ProfilePic:      picture,
 			Password:        string(randomPassword),
-			IsEmailVerified: true,                                // Já vem verificado pelo Google!
-			CPF:             "GOOGLE-" + uuid.New().String()[:4], // Temporário pra não quebrar a regra de CPF único
+			IsEmailVerified: true,
+			CPF:             "GOOGLE-" + uuid.New().String()[:4],
 		}
 
 		if err := database.DB.Create(&user).Error; err != nil {
@@ -295,7 +287,6 @@ func GoogleAuth(c *gin.Context) {
 		}
 	}
 
-	// 4. Usuário logado/criado! Vamos gerar o Token JWT do StudFy
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.ID,
 		"exp": time.Now().Add(time.Hour * 24).Unix(),

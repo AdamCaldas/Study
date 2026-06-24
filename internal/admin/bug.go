@@ -4,22 +4,20 @@ import (
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils" // 👈 O pacote mágico que criámos
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // ==========================================================
 // 🐛 1. USUÁRIO REPORTA UM BUG (Visão do Aluno/Professor)
 // ==========================================================
 func ReportBug(c *gin.Context) {
-	userIDInterface, _ := c.Get("userID")
-	var reporterID uuid.UUID
-	switch v := userIDInterface.(type) {
-	case uuid.UUID:
-		reporterID = v
-	case string:
-		reporterID, _ = uuid.Parse(v)
+	// 👇 Código reduzido de 9 linhas para apenas 4!
+	reporterID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
 	}
 
 	var input struct {
@@ -36,7 +34,7 @@ func ReportBug(c *gin.Context) {
 		ReporterID:  reporterID,
 		Title:       input.Title,
 		Description: input.Description,
-		Status:      "UNREAD", // Nasce automaticamente como Não Lido
+		Status:      utils.StatusPending, // 👈 Usando a Constante que criámos!
 	}
 
 	if err := database.DB.Create(&bug).Error; err != nil {
@@ -45,7 +43,7 @@ func ReportBug(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Bug reportado com sucesso! Nossa equipe técnica já foi notificada.",
+		"message": "Bug reportado com sucesso! A nossa equipa técnica já foi notificada.",
 		"bug":     bug,
 	})
 }
@@ -56,8 +54,6 @@ func ReportBug(c *gin.Context) {
 func ListBugs(c *gin.Context) {
 	var bugs []models.BugReport
 
-	// Puxa todos os bugs e já traz os dados de quem reportou (Preload)
-	// Ordena do mais novo pro mais velho
 	if err := database.DB.Preload("Reporter").Order("created_at desc").Find(&bugs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar a lista de bugs."})
 		return
@@ -73,7 +69,7 @@ func UpdateBugStatus(c *gin.Context) {
 	bugID := c.Param("id")
 
 	var input struct {
-		Status string `json:"status" binding:"required"` // Deve ser: UNREAD, ANALYSIS ou RESOLVED
+		Status string `json:"status" binding:"required"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -81,7 +77,6 @@ func UpdateBugStatus(c *gin.Context) {
 		return
 	}
 
-	// Atualiza apenas a coluna de status
 	if err := database.DB.Model(&models.BugReport{}).Where("id = ?", bugID).Update("status", input.Status).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar o status do bug."})
 		return

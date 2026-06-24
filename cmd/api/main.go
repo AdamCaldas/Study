@@ -23,20 +23,26 @@ import (
 )
 
 func main() {
+	// 1. Carrega Variáveis de Ambiente
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("Aviso: Arquivo .env não encontrado. Usando variáveis de ambiente do sistema.")
+		log.Println("Aviso: Arquivo .env não encontrado. Usando variáveis de ambiente do sistema (Modo Produção).")
 	}
 
+	// 2. Conecta ao Banco (Agora ultra-rápido sem AutoMigrate!)
 	database.ConnectDB()
 
+	// 3. Inicia o Roteador Gin em Release Mode se estiver em produção
+	if os.Getenv("GIN_MODE") == "release" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	router := gin.Default()
 
 	// ==========================================================
 	// 🗜️ MIDDLEWARES GLOBAIS
 	// ==========================================================
-	router.Use(gzip.Gzip(gzip.DefaultCompression)) // Compressão de payload
-	router.Use(cors.New(cors.Config{               // Configuração de CORS
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
+	router.Use(cors.New(cors.Config{
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{
@@ -45,13 +51,14 @@ func main() {
 		},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
+		MaxAge:           12 * time.Hour, // Faz cache das regras de CORS no navegador
 	}))
 
 	// ==========================================================
-	// 🔓 ROTAS PÚBLICAS (Autenticação e Health Check)
+	// 🔓 ROTAS PÚBLICAS
 	// ==========================================================
 	router.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{"message": "pong! Servidor StudFy Operacional 🚀"})
+		c.JSON(http.StatusOK, gin.H{"message": "pong! Servidor StudFy Operacional 🚀"})
 	})
 
 	router.POST("/v1/register", auth.Register)
@@ -62,12 +69,11 @@ func main() {
 	router.POST("/v1/auth/google", auth.GoogleAuth)
 
 	// ==========================================================
-	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO (Requer JWT)
+	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO
 	// ==========================================================
 	protected := router.Group("/v1/app")
 	protected.Use(auth.AuthMiddleware())
 	{
-		// 👉 Conta e Perfil
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
 		protected.PATCH("/me/settings", users.UpdateMySettings)
@@ -78,54 +84,41 @@ func main() {
 		protected.GET("/me/analytics", study.GetMyStudyAnalytics)
 		protected.GET("/me/dashboard", study.GetPersonalDashboard)
 
-		// 👉 Rotas de Configuração do Usuário
 		protected.PUT("/availability/:availability_id", users.UpdateAvailabilityProfile)
 
-		// =======================================================
-		// 📚 BANCO GLOBAL DE QUESTÕES (Leitura Alunos/Professores)
-		// =======================================================
 		protected.GET("/questions/studfy", study.ListStudfyQuestions)
 
-		// 👉 Notificações e Suporte (Bugs)
 		protected.GET("/notifications", admin.GetMyNotifications)
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
 		protected.POST("/bugs", admin.ReportBug)
 
-		// 👉 Central de Ajuda (Visão do Aluno - StudFy Academy)
 		protected.GET("/help-center", admin.GetHelpCenter)
 
-		// 👉 Rede Social (Vitrine)
 		protected.GET("/teachers/:id", users.GetTeacherProfile)
 		protected.POST("/teachers/:id/follow", users.FollowTeacher)
 		protected.DELETE("/teachers/:id/follow", users.UnfollowTeacher)
 
-		// 👉 Foco e Gamificação Global
 		protected.POST("/gamification/reward", gamification.RewardXP)
 		protected.POST("/focus/pomodoro", focus.RegisterPomodoro)
 		protected.POST("/focus/mood", focus.RegisterMood)
 
-		// 👉 Gestão Macro de Spaces (Turmas)
 		protected.POST("/spaces", auth.CheckSpaceLimit(), space.CreateSpace)
 		protected.GET("/spaces", space.ListSpaces)
 		protected.GET("/spaces/code/:code", space.GetSpaceByCode)
 		protected.POST("/spaces/join", space.RequestSpaceAccess)
 		protected.POST("/attendance/check-in", space.RegisterAttendance)
 
-		// 👉 Organização Externa de Cadernos (Pastas e Guias)
 		protected.GET("/notebooks/:notebook_id", notebook.GetNotebookFull)
 		protected.POST("/notebooks/:notebook_id/guides", notebook.CreateGuide)
 		protected.PUT("/guides/:guide_id", notebook.UpdateGuide)
 		protected.DELETE("/guides/:guide_id", notebook.DeleteGuide)
 		protected.PATCH("/notebooks/:notebook_id/guides/reorder", notebook.ReorderGuides)
 
-		// =======================================================
-		// 📄 PAGINAÇÃO DINÂMICA (As páginas nascem DENTRO da Guia)
-		// =======================================================
-		protected.POST("/guides/:guide_id/pages", notebook.CreatePage)      // 👈 Cria a página no overflow
-		protected.GET("/guides/:guide_id/pages", notebook.ListPagesByGuide) // 👈 Lista pro Front renderizar o A4
-		protected.PATCH("/pages/reorder", notebook.ReorderPages)            // 👈 Arrasta e solta de páginas
+		protected.POST("/guides/:guide_id/pages", notebook.CreatePage)
+		protected.GET("/guides/:guide_id/pages", notebook.ListPagesByGuide)
+		protected.PATCH("/pages/reorder", notebook.ReorderPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
-		protected.DELETE("/pages/:page_id", notebook.DeletePage) // 👈 Apaga quando fica vazia
+		protected.DELETE("/pages/:page_id", notebook.DeletePage)
 
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)
@@ -133,14 +126,12 @@ func main() {
 		spaceRoutes := protected.Group("/spaces/:space_id")
 		spaceRoutes.Use(auth.CheckSpaceAccess())
 		{
-			// 👉 Mini-Rotas de Lazy Loading
 			spaceRoutes.GET("", space.GetSpaceDetails)
 			spaceRoutes.GET("/notebooks", notebook.ListSpaceNotebooks)
 			spaceRoutes.GET("/notes", space.ListSpaceNotes)
 			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)
 			spaceRoutes.GET("/dashboard", study.GetSpaceDashboard)
 
-			// 👉 Setup e Moderação da Turma
 			spaceRoutes.PUT("", space.UpdateSpace)
 			spaceRoutes.DELETE("", space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
@@ -152,16 +143,12 @@ func main() {
 			spaceRoutes.GET("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 			spaceRoutes.PUT("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 
-			// =======================================================
-			// 📚 BANCO DE QUESTÕES DA TURMA (SPACE E EDITAIS)
-			// =======================================================
 			spaceRoutes.POST("/questions", study.CreateSpaceQuestion)
 			spaceRoutes.GET("/questions", study.ListSpaceQuestions)
 			spaceRoutes.PUT("/questions/:question_id", study.UpdateSpaceQuestion)
 			spaceRoutes.DELETE("/questions/:question_id", study.DeleteSpaceQuestion)
-			spaceRoutes.POST("/questions/clone", study.CloneStudfyQuestion) // 👈 A Mágica de Clonar!
+			spaceRoutes.POST("/questions/clone", study.CloneStudfyQuestion)
 
-			// 👉 Ações de Cadernos e Notas Rápidas
 			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
@@ -169,9 +156,6 @@ func main() {
 			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
 			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
 
-			// =======================================================
-			// 👉 MOTOR DO CRONOGRAMA (FIXED)
-			// =======================================================
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
 			spaceRoutes.POST("/plans/auto-fit", study.AutoFitPlanBlocks)
 			spaceRoutes.GET("/plans", study.ListPlans)
@@ -182,9 +166,6 @@ func main() {
 			spaceRoutes.PUT("/plans/:plan_id", study.UpdateStudyPlan)
 			spaceRoutes.DELETE("/plans/:plan_id", study.DeleteStudyPlan)
 
-			// =======================================================
-			// 👉 MOTOR DO CICLO (ADAPTIVE)
-			// =======================================================
 			spaceRoutes.POST("/cycles/auto-generate", study.GenerateAutoCycle)
 			spaceRoutes.GET("/cycles", study.ListCycles)
 			spaceRoutes.PATCH("/cycles/advance", study.AdvanceCycleStep)
@@ -193,7 +174,6 @@ func main() {
 			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
 			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)
 
-			// 👉 Avaliações Tradicionais
 			spaceRoutes.POST("/reviews", study.CreateReview)
 			spaceRoutes.POST("/quizzes", study.CreateQuiz)
 			spaceRoutes.POST("/quizzes/:quiz_id/submit", study.SubmitQuiz)
@@ -201,14 +181,12 @@ func main() {
 			spaceRoutes.PUT("/quizzes/results/:result_id/grade", study.GradeQuizManual)
 			spaceRoutes.POST("/certificate", study.ClaimCertificate)
 
-			// 👉 Comunicação Integrada
 			spaceRoutes.GET("/doubts", space.ListSpaceDoubts)
 			spaceRoutes.POST("/pages/:page_id/doubts", space.CreatePageDoubt)
 			spaceRoutes.PUT("/doubts/:doubt_id/answer", space.AnswerPageDoubt)
 			spaceRoutes.POST("/megafone", space.SendMegaphoneMessage)
 			spaceRoutes.POST("/attendance", space.GenerateAttendanceQR)
 
-			// 👉 Gamificação da Turma
 			spaceRoutes.GET("/missions", gamification.GetActiveMissions)
 			spaceRoutes.POST("/missions", gamification.CreateFlashMission)
 			spaceRoutes.POST("/missions/:mission_id/complete", gamification.CompleteFlashMission)
@@ -217,22 +195,15 @@ func main() {
 			spaceRoutes.GET("/ranking", gamification.GetSpaceRanking)
 			spaceRoutes.PATCH("/ranking/toggle", gamification.ToggleSpaceRanking)
 
-			// 👉 Analytics e Automação (Painel do Diretor)
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
 			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
 			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
 
-			
-			// =======================================================
-			// 🃏 FLASHCARDS COLABORATIVOS (Wiki da Turma)
-			// =======================================================
 			spaceRoutes.POST("/flashcards", study.CreateFlashcard)
 			spaceRoutes.GET("/flashcards", study.ListFlashcards)
 			spaceRoutes.PUT("/flashcards/:card_id", study.UpdateFlashcard)
 			spaceRoutes.DELETE("/flashcards/:card_id", study.DeleteFlashcard)
-			// =======================================================
-			// 🏷️ FILTROS DOS FLASHCARDS (Rotas pro Front-end novo)
-			// =======================================================
+
 			spaceRoutes.POST("/flashcard-categories", study.CreateCategory)
 			spaceRoutes.GET("/flashcard-categories", study.ListCategories)
 			spaceRoutes.DELETE("/flashcard-categories/:category_id", study.DeleteCategory)
@@ -241,9 +212,6 @@ func main() {
 			spaceRoutes.GET("/flashcard-tags", study.ListTags)
 			spaceRoutes.DELETE("/flashcard-tags/:tag_id", study.DeleteTag)
 
-			// =======================================================
-			// 📁 PASTAS DE EDITAIS E MATÉRIAS (QUESTION GROUPS)
-			// =======================================================
 			spaceRoutes.POST("/question-groups", study.CreateQuestionGroup)
 			spaceRoutes.GET("/question-groups", study.ListQuestionGroups)
 			spaceRoutes.PUT("/question-groups/:group_id", study.UpdateQuestionGroup)
@@ -284,8 +252,6 @@ func main() {
 		godMode.POST("/help-center/articles", admin.CreateHelpArticle)
 		godMode.DELETE("/help-center/articles/:article_id", admin.DeleteHelpArticle)
 		godMode.POST("/users/batch-delete", admin.MassDeleteUsers)
-
-		// 👉 Gestão do Banco Oficial de Questões (Painel StudFy)
 		godMode.POST("/questions", study.AdminCreateStudfyQuestion)
 		godMode.PUT("/questions/:id", study.AdminUpdateStudfyQuestion)
 		godMode.DELETE("/questions/:id", study.AdminDeleteStudfyQuestion)
