@@ -8,17 +8,15 @@ import (
 
 	"studfy-backend/internal/admin"
 	"studfy-backend/internal/auth"
-
-	//"studfy-backend/internal/bff"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
-	"studfy-backend/internal/middleware"
 	"studfy-backend/internal/notebook"
 	"studfy-backend/internal/space"
 	"studfy-backend/internal/study"
 	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -41,11 +39,20 @@ func main() {
 	router := gin.Default()
 
 	// ==========================================================
-	// 🗜️ MIDDLEWARES GLOBAIS DE SEGURANÇA E PERFORMANCE
+	// 🗜️ MIDDLEWARES GLOBAIS
 	// ==========================================================
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
-	router.Use(middleware.SecureCORS())  // 👈 Escudo 1: Apenas os seus domínios
-	router.Use(middleware.RateLimiter()) // 👈 Escudo 2: Bloqueia ataques DDoS e robôs
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin", "Content-Type", "Content-Length", "Accept-Encoding",
+			"X-CSRF-Token", "Authorization", "Accept", "Cache-Control", "X-Requested-With",
+		},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour, // Faz cache das regras de CORS no navegador
+	}))
 
 	// ==========================================================
 	// 🔓 ROTAS PÚBLICAS
@@ -67,7 +74,6 @@ func main() {
 	protected := router.Group("/v1/app")
 	protected.Use(auth.AuthMiddleware())
 	{
-		//protected.GET("/bootstrap", bff.GetAppBootstrap)
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
 		protected.PATCH("/me/settings", users.UpdateMySettings)
