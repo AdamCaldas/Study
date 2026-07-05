@@ -8,15 +8,16 @@ import (
 
 	"studfy-backend/internal/admin"
 	"studfy-backend/internal/auth"
+	"studfy-backend/internal/bff"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
+	"studfy-backend/internal/middleware"
 	"studfy-backend/internal/notebook"
 	"studfy-backend/internal/space"
 	"studfy-backend/internal/study"
 	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 
-	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -39,20 +40,11 @@ func main() {
 	router := gin.Default()
 
 	// ==========================================================
-	// 🗜️ MIDDLEWARES GLOBAIS
+	// 🗜️ MIDDLEWARES GLOBAIS DE SEGURANÇA E PERFORMANCE
 	// ==========================================================
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
-	router.Use(cors.New(cors.Config{
-		AllowAllOrigins: true,
-		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders: []string{
-			"Origin", "Content-Type", "Content-Length", "Accept-Encoding",
-			"X-CSRF-Token", "Authorization", "Accept", "Cache-Control", "X-Requested-With",
-		},
-		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour, // Faz cache das regras de CORS no navegador
-	}))
+	router.Use(middleware.SecureCORS())  // 👈 Escudo 1: Apenas os seus domínios
+	router.Use(middleware.RateLimiter()) // 👈 Escudo 2: Bloqueia ataques DDoS e robôs
 
 	// ==========================================================
 	// 🔓 ROTAS PÚBLICAS
@@ -74,6 +66,7 @@ func main() {
 	protected := router.Group("/v1/app")
 	protected.Use(auth.AuthMiddleware())
 	{
+		protected.GET("/bootstrap", bff.GetAppBootstrap)
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
 		protected.PATCH("/me/settings", users.UpdateMySettings)
@@ -119,6 +112,14 @@ func main() {
 		protected.PATCH("/pages/reorder", notebook.ReorderPages)
 		protected.PUT("/pages/:page_id", notebook.UpdatePage)
 		protected.DELETE("/pages/:page_id", notebook.DeletePage)
+
+		protected.GET("/analytics/productivity", study.GetProductivityReport)
+		protected.GET("/analytics/quiz-performance", study.GetQuizPerformanceReport)
+		protected.GET("/analytics/focus-mood", study.GetFocusAndMoodReport)
+		protected.GET("/analytics/gamification", study.GetGamificationReport)
+		protected.GET("/analytics/debts", study.GetStudyDebtReport)
+		protected.GET("/analytics/engagement", study.GetSpaceEngagementReport)
+		protected.GET("/analytics/reviews", study.GetPendingReviewsReport)
 
 		// ------------------------------------------------------
 		// 🏰 ROTAS INTERNAS DO SPACE (Contexto da Sala de Aula)

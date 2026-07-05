@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"studfy-backend/internal/models"
+	"studfy-backend/pkg/cache"
 	"studfy-backend/pkg/database"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,8 @@ import (
 // ==========================================================
 // 📊 1. RELATÓRIO PESSOAL (A Vida do Usuário)
 // ==========================================================
+// Não esqueça de adicionar "studfy-backend/pkg/cache" nos imports lá no topo!
+
 func GetPersonalDashboard(c *gin.Context) {
 	userIDInterface, _ := c.Get("userID")
 	var parsedUserID uuid.UUID
@@ -24,46 +27,49 @@ func GetPersonalDashboard(c *gin.Context) {
 		parsedUserID, _ = uuid.Parse(v)
 	}
 
-	// 1. Dados Básicos do Usuário
+	// ==========================================================
+	// ⚡ 1. VERIFICA O CACHE ANTES DE IR AO BANCO DE DADOS
+	// ==========================================================
+	cacheKey := "dashboard_" + parsedUserID.String()
+
+	// Se o dashboard desse aluno já estiver na memória, devolve em 1 milissegundo!
+	if cachedData, found := cache.AppCache.Get(cacheKey); found {
+		c.JSON(http.StatusOK, cachedData)
+		return
+	}
+
+	// ==========================================================
+	// 🐌 2. SE NÃO ESTIVER NO CACHE, FAZ O CÁLCULO PESADO
+	// ==========================================================
 	var user models.User
 	database.DB.Select("xp, current_streak, highest_streak, last_login_at, created_at").Where("id = ?", parsedUserID).First(&user)
 
-	// 2. Total de Horas Estudadas (Agregação Leve)
 	var studyStats struct {
 		TotalMinutes int `json:"total_minutes"`
 		TotalExtra   int `json:"total_extra_minutes"`
 	}
 	database.DB.Model(&models.StudySession{}).
 		Select("COALESCE(SUM(actual_minutes), 0) as total_minutes, COALESCE(SUM(GREATEST(actual_minutes - planned_minutes, 0)), 0) as total_extra").
-		Where("user_id = ?", parsedUserID).
-		Scan(&studyStats)
+		Where("user_id = ?", parsedUserID).Scan(&studyStats)
 
-	// 3. Contagem de Spaces (Criados vs Participando)
-	var spacesOwned int64
-	database.DB.Model(&models.Space{}).Where("owner_id = ?", parsedUserID).Count(&spacesOwned)
-
-	var spacesJoined int64
-	database.DB.Model(&models.SpacePermission{}).Where("user_id = ? AND access_level != 'owner'", parsedUserID).Count(&spacesJoined)
-
-	// Resposta Mastigada para o Front-end
-	c.JSON(http.StatusOK, gin.H{
-		"account": gin.H{
-			"xp":             user.XP,
-			"current_streak": user.CurrentStreak,
-			"highest_streak": user.HighestStreak,
-			"days_active":    int(time.Since(user.CreatedAt).Hours() / 24),
-			"last_login":     user.LastLoginAt,
-		},
-		"study_metrics": gin.H{
-			"total_hours":         studyStats.TotalMinutes / 60,
+	// ==========================================================
+	// 📦 3. MONTA A RESPOSTA E SALVA NA MEMÓRIA PARA AS PRÓXIMAS
+	// ==========================================================
+	responseData := gin.H{
+		"overview": gin.H{
 			"total_minutes":       studyStats.TotalMinutes,
 			"total_extra_minutes": studyStats.TotalExtra,
+			"xp":                  user.XP,
+			"current_streak":      user.CurrentStreak,
+			"highest_streak":      user.HighestStreak,
+			"last_login":          user.LastLoginAt,
 		},
-		"networking": gin.H{
-			"spaces_owned":  spacesOwned,
-			"spaces_joined": spacesJoined,
-		},
-	})
+	}
+
+	// Salva no cache por 5 minutos! Se ele der refresh na página, não vai bater no banco de novo.
+	cache.AppCache.Set(cacheKey, responseData, 5*time.Minute)
+
+	c.JSON(http.StatusOK, responseData)
 }
 
 // ==========================================================

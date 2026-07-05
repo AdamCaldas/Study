@@ -108,7 +108,7 @@ func CreateFlashMission(c *gin.Context) {
 }
 
 // ==========================================================
-// ⚡ LISTAR MISSÕES ATIVAS DO SPACE (Visão do Aluno)
+// ⚡ LISTAR MISSÕES ATIVAS DO SPACE (Visão do Aluno) - OTIMIZADO 🚀
 // ==========================================================
 func GetActiveMissions(c *gin.Context) {
 	spaceID := c.Param("space_id")
@@ -118,9 +118,9 @@ func GetActiveMissions(c *gin.Context) {
 		return
 	}
 
+	// 1. Busca todas as missões ativas (1ª Query)
 	var missions []models.FlashMission
 	now := time.Now()
-
 	database.DB.Where("space_id = ? AND expires_at > ?", spaceID, now).Find(&missions)
 
 	type MissionResponse struct {
@@ -129,17 +129,32 @@ func GetActiveMissions(c *gin.Context) {
 	}
 
 	var response []MissionResponse
-	for _, m := range missions {
-		var completion models.MissionCompletion
-		isComp := false
-		if err := database.DB.Where("mission_id = ? AND user_id = ?", m.ID, userID).First(&completion).Error; err == nil {
-			isComp = true
-		}
-		response = append(response, MissionResponse{FlashMission: m, IsCompleted: isComp})
+
+	if len(missions) == 0 {
+		c.JSON(http.StatusOK, gin.H{"missions": []MissionResponse{}})
+		return
 	}
 
-	if response == nil {
-		response = []MissionResponse{}
+	// 2. Extrai apenas os IDs das missões para fazer a busca em lote
+	var missionIDs []uuid.UUID
+	for _, m := range missions {
+		missionIDs = append(missionIDs, m.ID)
+	}
+
+	// 3. Busca TODAS as conclusões deste usuário de UMA SÓ VEZ (2ª Query - A Mágica ✨)
+	var completions []models.MissionCompletion
+	database.DB.Where("mission_id IN ? AND user_id = ?", missionIDs, userID).Find(&completions)
+
+	// 4. Cria um "Dicionário" (Mapa em Memória O(1)) para acesso instantâneo
+	completionMap := make(map[uuid.UUID]bool)
+	for _, c := range completions {
+		completionMap[c.MissionID] = true
+	}
+
+	// 5. Monta a resposta sem encostar no banco de dados!
+	for _, m := range missions {
+		isComp := completionMap[m.ID]
+		response = append(response, MissionResponse{FlashMission: m, IsCompleted: isComp})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"missions": response})
