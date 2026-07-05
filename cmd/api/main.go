@@ -8,7 +8,8 @@ import (
 
 	"studfy-backend/internal/admin"
 	"studfy-backend/internal/auth"
-	"studfy-backend/internal/bff"
+
+	//"studfy-backend/internal/bff"
 	"studfy-backend/internal/focus"
 	"studfy-backend/internal/gamification"
 	"studfy-backend/internal/middleware"
@@ -66,7 +67,7 @@ func main() {
 	protected := router.Group("/v1/app")
 	protected.Use(auth.AuthMiddleware())
 	{
-		protected.GET("/bootstrap", bff.GetAppBootstrap)
+		//protected.GET("/bootstrap", bff.GetAppBootstrap)
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
 		protected.PATCH("/me/settings", users.UpdateMySettings)
