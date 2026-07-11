@@ -44,6 +44,7 @@ func main() {
 	// ==========================================================
 	// teste
 	//teste2
+	//teste3
 
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.SecureCORS())
