@@ -42,6 +42,8 @@ func main() {
 	// ==========================================================
 	// 🗜️ MIDDLEWARES GLOBAIS DE SEGURANÇA E PERFORMANCE
 	// ==========================================================
+	// teste
+
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.SecureCORS())
 	router.Use(middleware.RateLimiter())
