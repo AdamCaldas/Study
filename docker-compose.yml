@@ -1,0 +1,52 @@
+services:
+  # ==========================================================
+  # 🐘 BANCO DE DADOS — PostgreSQL 17 (substitui o Supabase)
+  # ==========================================================
+  db:
+    image: postgres:17-alpine
+    container_name: studfy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-studfy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-studfy}
+      POSTGRES_DB: ${POSTGRES_DB:-studfy}
+    ports:
+      # Expõe o banco no host (ex.: para inspecionar com DBeaver/psql).
+      # Remova esta linha se não quiser o banco acessível de fora.
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-studfy} -d ${POSTGRES_DB:-studfy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================================
+  # ⚙️  API — Backend Go/Gin (StudFy)
+  # ==========================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: studfy-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Conexão com o Postgres do container (nome do serviço "db" vira o host)
+      DATABASE_URL: "postgres://${POSTGRES_USER:-studfy}:${POSTGRES_PASSWORD:-studfy}@db:5432/${POSTGRES_DB:-studfy}?sslmode=disable"
+      # Cria/atualiza as tabelas no primeiro boot (banco novo começa vazio)
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
+      GIN_MODE: ${GIN_MODE:-release}
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      SENDER_EMAIL: ${SENDER_EMAIL}
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+volumes:
+  pgdata:
