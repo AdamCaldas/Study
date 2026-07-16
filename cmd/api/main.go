@@ -80,6 +80,10 @@ func main() {
 		protected.GET("/me/analytics", study.GetMyStudyAnalytics)
 		protected.GET("/me/dashboard", study.GetPersonalDashboard)
 
+		protected.GET("/me/analytics/heatmap", study.GetStudyHeatmap)
+		protected.GET("/me/analytics/strengths", study.GetStrengthsAndWeaknesses)
+		protected.GET("/me/analytics/efficiency", study.GetTimeEfficiency)
+
 		protected.PUT("/availability/:availability_id", users.UpdateAvailabilityProfile)
 
 		protected.GET("/questions/studfy", study.ListStudfyQuestions)
@@ -202,6 +206,9 @@ func main() {
 			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
 			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
 			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
+			spaceRoutes.GET("/reports/at-risk", space.GetAtRiskStudents)
+			spaceRoutes.GET("/reports/mortality", space.GetMaterialMortalityRate)
+			spaceRoutes.GET("/reports/engagement", space.GetMaterialEngagement)
 
 			spaceRoutes.POST("/flashcards", study.CreateFlashcard)
 			spaceRoutes.GET("/flashcards", study.ListFlashcards)
@@ -259,6 +266,10 @@ func main() {
 		godMode.POST("/questions", study.AdminCreateStudfyQuestion)
 		godMode.PUT("/questions/:id", study.AdminUpdateStudfyQuestion)
 		godMode.DELETE("/questions/:id", study.AdminDeleteStudfyQuestion)
+		godMode.GET("/report", admin.GetPlatformReport)
+		godMode.GET("/reports/plans", admin.GetUsersByPlan)
+		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
+		godMode.GET("/reports/moods", admin.GetMoodStats)
 	}
 
 	port := os.Getenv("PORT")
