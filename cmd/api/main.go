@@ -266,7 +266,6 @@ func main() {
 		godMode.POST("/questions", study.AdminCreateStudfyQuestion)
 		godMode.PUT("/questions/:id", study.AdminUpdateStudfyQuestion)
 		godMode.DELETE("/questions/:id", study.AdminDeleteStudfyQuestion)
-		godMode.GET("/report", admin.GetPlatformReport)
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
