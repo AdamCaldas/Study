@@ -29,6 +29,7 @@ func main() {
 	if err != nil {
 		log.Println("Aviso: Arquivo .env não encontrado. Usando variáveis de ambiente do sistema (Modo Produção).")
 	}
+	// teste de commit
 
 	// 2. Conecta ao Banco (Agora ultra-rápido sem AutoMigrate!)
 	database.ConnectDB()
