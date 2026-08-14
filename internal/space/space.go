@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"studfy-backend/internal/auth"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -56,11 +58,18 @@ func CreateSpace(c *gin.Context) {
 		input.Visibility = "private"
 	}
 
-	// 🌟 FASE 2: Busca quem está criando o Space para saber o Cargo dele
-	var currentUser models.User
-	if err := database.DB.Where("id = ?", userID).First(&currentUser).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não encontrado"})
-		return
+	// 🌟 FASE 2: Descobre o Cargo de quem está criando o Space.
+	// A role vem do token (realm_access.roles); só caímos no banco quando o
+	// app NÃO está em modo Keycloak-only, para respeitar quem virou TEACHER
+	// pelo /me/become-teacher — isso é dado do app, não existe no realm.
+	isTeacher := auth.HasTeacherRole(auth.GetTokenRoles(c))
+	if !isTeacher && !auth.KeycloakOnly() {
+		var currentUser models.User
+		if err := database.DB.Where("id = ?", userID).First(&currentUser).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuário não encontrado"})
+			return
+		}
+		isTeacher = currentUser.AccountType == utils.RoleTeacher
 	}
 
 	randomHex := uuid.New().String()[:6]
@@ -82,7 +91,7 @@ func CreateSpace(c *gin.Context) {
 
 	// 🌟 FASE 2: A MÁGICA DA SALA DE AULA 🌟
 	// Se quem cria for PROFESSOR, o Space nasce blindado como Classroom
-	if currentUser.AccountType == "TEACHER" {
+	if isTeacher {
 		newSpace.IsClassroom = true
 	}
 

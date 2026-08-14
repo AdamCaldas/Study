@@ -18,6 +18,7 @@ import (
 	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 
+	"github.com/MicahParks/keyfunc/v2" // 👈 1. IMPORT ADICIONADO
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -29,10 +30,43 @@ func main() {
 	if err != nil {
 		log.Println("Aviso: Arquivo .env não encontrado. Usando variáveis de ambiente do sistema (Modo Produção).")
 	}
-	// teste de commit
 
 	// 2. Conecta ao Banco (Agora ultra-rápido sem AutoMigrate!)
 	database.ConnectDB()
+
+	// ==========================================================
+	// 🔑 KEYCLOAK OIDC / JWKS
+	// ==========================================================
+	keycloakURL := os.Getenv("KEYCLOAK_URL")
+	if keycloakURL == "" {
+		keycloakURL = "http://localhost:8080/realms/studfy"
+	}
+	jwksURL := keycloakURL + "/protocol/openid-connect/certs"
+
+	// Carrega e atualiza as chaves públicas do Keycloak em background.
+	// Tentamos algumas vezes porque o Keycloak pode ainda estar subindo.
+	jwksOptions := keyfunc.Options{
+		RefreshInterval:   time.Hour, // recarrega as chaves de hora em hora
+		RefreshUnknownKID: true,      // busca a chave na hora se o `kid` for novo (rotação)
+		RefreshTimeout:    10 * time.Second,
+		RefreshErrorHandler: func(err error) {
+			log.Printf("Aviso: falha ao atualizar as chaves do Keycloak: %v", err)
+		},
+	}
+
+	var jwks *keyfunc.JWKS
+	for attempt := 1; attempt <= 5; attempt++ {
+		jwks, err = keyfunc.Get(jwksURL, jwksOptions)
+		if err == nil {
+			break
+		}
+		log.Printf("Tentativa %d/5: Keycloak indisponível em %s (%v)", attempt, jwksURL, err)
+		time.Sleep(3 * time.Second)
+	}
+	if err != nil {
+		log.Fatalf("Erro ao carregar chaves públicas do Keycloak (%s): %v", jwksURL, err)
+	}
+	log.Printf("Keycloak: chaves públicas carregadas de %s", jwksURL)
 
 	// 3. Inicia o Roteador Gin em Release Mode se estiver em produção
 	if os.Getenv("GIN_MODE") == "release" {
@@ -43,7 +77,6 @@ func main() {
 	// ==========================================================
 	// 🗜️ MIDDLEWARES GLOBAIS DE SEGURANÇA E PERFORMANCE
 	// ==========================================================
-
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.SecureCORS())
 	router.Use(middleware.RateLimiter())
@@ -66,7 +99,7 @@ func main() {
 	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO
 	// ==========================================================
 	protected := router.Group("/v1/app")
-	protected.Use(auth.AuthMiddleware())
+	protected.Use(auth.AuthMiddleware(jwks)) // 👈 2. PASSANDO O JWKS AQUI
 	{
 		// 🚀 ROTA MÁGICA DO FRONT-END (O COMBO!)
 		protected.GET("/bootstrap", bff.GetAppBootstrap)
@@ -235,7 +268,7 @@ func main() {
 	// ⚡ MODO DEUS (Painel Admin Global)
 	// ==========================================================
 	godMode := router.Group("/v1/admin")
-	godMode.Use(auth.AuthMiddleware(), auth.AdminOnly())
+	godMode.Use(auth.AuthMiddleware(jwks), auth.AdminOnly())
 	{
 		godMode.GET("/report", admin.GetPlatformReport)
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
@@ -267,12 +300,12 @@ func main() {
 		godMode.POST("/questions", study.AdminCreateStudfyQuestion)
 		godMode.PUT("/questions/:id", study.AdminUpdateStudfyQuestion)
 		godMode.DELETE("/questions/:id", study.AdminDeleteStudfyQuestion)
-
 	}
 
+	// 3. ALTERAÇÃO DA PORTA PADRÃO PARA 8082
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8082"
 	}
 
 	srv := &http.Server{
