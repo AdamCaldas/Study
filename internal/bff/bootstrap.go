@@ -23,8 +23,20 @@ func GetAppBootstrap(c *gin.Context) {
 	}
 
 	// 1️⃣ Busca o Perfil
+	// Sem lista de colunas: o front consome o objeto inteiro — sem
+	// `account_type` o RoleGuard não monta o layout e a tela fica em branco,
+	// sem erro nenhum. `password` e `deleted_at` são `json:"-"` no model, então
+	// não vazam na resposta.
+	// O erro é tratado: um `First` silencioso devolvia o usuário zerado
+	// (id 00000000-…) quando não havia linha, e o front não tinha como saber.
 	var user models.User
-	database.DB.Select("id, full_name, nickname, profile_pic, xp, current_streak, created_at").Where("id = ?", userID).First(&user)
+	if err := database.DB.Where("id = ?", userID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":  "Perfil não encontrado para o usuário do token",
+			"detail": "com KEYCLOAK_ONLY ativo nada é espelhado na tabela `users`",
+		})
+		return
+	}
 
 	// 2️⃣ Busca os Spaces (Turmas)
 	var spaces []models.Space
