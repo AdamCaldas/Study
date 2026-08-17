@@ -42,6 +42,15 @@ services:
       GIN_MODE: ${GIN_MODE:-release}
       PORT: "8080"
       JWT_SECRET: ${JWT_SECRET}
+      # 🔑 Keycloak — de onde a API baixa as chaves públicas (JWKS).
+      # É o nome do container na rede do Docker, NÃO "localhost": dentro do
+      # container, localhost é o próprio container da API.
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-http://keycloak:8080/realms/studfy}
+      # O `iss` que vem escrito dentro do token, do ponto de vista de quem
+      # pediu o token (o navegador/Bruno, no host). Por isso é "localhost".
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/studfy}
+      # A identidade sai inteira do token: nada é lido nem criado em `users`.
+      KEYCLOAK_ONLY: ${KEYCLOAK_ONLY:-true}
       FRONTEND_URL: ${FRONTEND_URL}
       BREVO_API_KEY: ${BREVO_API_KEY}
       SENDER_EMAIL: ${SENDER_EMAIL}

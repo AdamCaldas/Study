@@ -22,6 +22,6 @@ RUN apk add --no-cache ca-certificates tzdata
 # Copia apenas o binário compilado
 COPY --from=builder /app/api-server /app/api-server
 
-EXPOSE 8080
+EXPOSE 8081
 
 ENTRYPOINT ["/app/api-server"]
