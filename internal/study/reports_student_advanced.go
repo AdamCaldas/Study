@@ -76,9 +76,11 @@ func GetStrengthsAndWeaknesses(c *gin.Context) {
 	}
 	var stats []SubjectStats
 
+	// ⚠️ Faltava passar o userID: o `?` ficava sem valor e a consulta não rodava,
+	// então a matriz voltava sempre vazia.
 	database.DB.Model(&models.StudySession{}).
 		Select("activity_name as subject, SUM(actual_minutes) as minutes").
-		Where("user_id = ? AND activity_name != ''").
+		Where("user_id = ? AND activity_name != ''", userID).
 		Group("activity_name").
 		Scan(&stats)
 

@@ -192,14 +192,17 @@ func GetSpaceEngagementReport(c *gin.Context) {
 	var flashcardsCreated, notesCreated, doubtsAsked int64
 
 	database.DB.Model(&models.Flashcard{}).Where("created_by_id = ?", userID).Count(&flashcardsCreated)
-	// QuickNotes usa o SpaceID para identificar, mas vamos assumir um modelo de log de atividade para o engajamento geral
 	database.DB.Model(&models.PageDoubt{}).Where("student_id = ?", userID).Count(&doubtsAsked)
+
+	// ⚠️ `notes_created` era declarado e nunca preenchido: voltava 0 para sempre.
+	// Anotação do aluno = página criada por ele.
+	database.DB.Model(&models.Page{}).Where("created_by_id = ?", userID).Count(&notesCreated)
 
 	c.JSON(http.StatusOK, gin.H{
 		"flashcards_created": flashcardsCreated,
 		"doubts_asked":       doubtsAsked,
 		"notes_created":      notesCreated,
-		"total_interactions": flashcardsCreated + doubtsAsked, // Somatório para nível de engajamento
+		"total_interactions": flashcardsCreated + doubtsAsked + notesCreated,
 	})
 }
 

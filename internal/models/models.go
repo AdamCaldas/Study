@@ -45,6 +45,24 @@ type User struct {
 	PushNotifications bool   `gorm:"default:true" json:"push_notifications"`
 }
 
+// ==========================================================
+// 👤 PERFIL PÚBLICO (o que é seguro mostrar para outros usuários)
+// ==========================================================
+// Usado nas associações (criador de flashcard, de grupo de questões...).
+// Serializar o `User` inteiro nessas listas vazava CPF e e-mail de quem criou
+// o conteúdo para todos os colegas de turma. Este tipo aponta para a mesma
+// tabela `users`, mas só carrega e só devolve o que é público.
+// O `type:uuid;primaryKey` precisa espelhar exatamente o do User: é a partir
+// daqui que o GORM decide o tipo das chaves estrangeiras que apontam para cá.
+type PublicUser struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;column:id" json:"id"`
+	FullName   string    `gorm:"column:full_name" json:"full_name"`
+	Nickname   string    `gorm:"column:nickname" json:"nickname"`
+	ProfilePic string    `gorm:"column:profile_pic" json:"profile_picture_url"`
+}
+
+func (PublicUser) TableName() string { return "users" }
+
 // SPACE
 type Space struct {
 	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
@@ -209,9 +227,10 @@ type PageNote struct {
 
 // STUDY STRATEGY (O Cérebro do Space)
 type StudyStrategy struct {
-	ID                 uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID            uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
-	Mode               string    `gorm:"size:50;not null;default:'adaptive'" json:"mode"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// idx_strategy_lookup: TODA rota de plano/ciclo busca por estes três campos.
+	SpaceID            uuid.UUID `gorm:"type:uuid;index;index:idx_strategy_lookup,priority:1" json:"space_id"`
+	Mode               string    `gorm:"size:50;not null;default:'adaptive';index:idx_strategy_lookup,priority:2" json:"mode"`
 	Source             string    `gorm:"size:50;not null;default:'user'" json:"source"` // NOVO: Trava Institucional
 	TargetGoal         string    `gorm:"size:255" json:"target_goal"`
 	HoursPerDay        float64   `json:"hours_per_day"`
@@ -223,7 +242,7 @@ type StudyStrategy struct {
 
 	Blocks []StudyBlock `gorm:"foreignKey:StrategyID;constraint:OnDelete:CASCADE" json:"blocks"`
 
-	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;index:idx_strategy_lookup,priority:3" json:"created_by_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -316,22 +335,26 @@ type QuizQuestion struct {
 }
 
 type QuizResult struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	QuizID         uuid.UUID `gorm:"type:uuid;index;not null" json:"quiz_id"`
-	UserID         uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
-	SpaceID        uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// idx_result_quiz_user: usado na trava de reenvio do simulado.
+	QuizID uuid.UUID `gorm:"type:uuid;not null;index;index:idx_result_quiz_user,priority:1" json:"quiz_id"`
+	UserID uuid.UUID `gorm:"type:uuid;index;index:idx_result_quiz_user,priority:2" json:"user_id"`
+	// idx_result_space_status: usado no termômetro da turma e no certificado.
+	SpaceID        uuid.UUID `gorm:"type:uuid;index;index:idx_result_space_status,priority:1" json:"space_id"`
 	Score          float64   `json:"score"`
 	TotalQuestions int       `json:"total_questions"`
-	Status         string    `gorm:"size:20;default:'completed'" json:"status"`
+	Status         string    `gorm:"size:20;default:'completed';index:idx_result_space_status,priority:2" json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
 type ActivityLog struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID   uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
-	UserID    uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
-	Action    string    `gorm:"size:100;not null" json:"action"`
-	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// idx_log_space_date: histórico da turma, sempre lido por space + data.
+	SpaceID uuid.UUID `gorm:"type:uuid;index;index:idx_log_space_date,priority:1" json:"space_id"`
+	// idx_log_user_action_date: contagem do limite diário de XP por ação.
+	UserID    uuid.UUID `gorm:"type:uuid;index;index:idx_log_user_action_date,priority:1" json:"user_id"`
+	Action    string    `gorm:"size:100;not null;index:idx_log_user_action_date,priority:2" json:"action"`
+	CreatedAt time.Time `gorm:"index;index:idx_log_space_date,priority:2;index:idx_log_user_action_date,priority:3" json:"created_at"`
 }
 
 type PaymentHistory struct {
@@ -556,7 +579,7 @@ type BugReport struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	Reporter User `gorm:"foreignKey:ReporterID" json:"reporter"`
+	Reporter *PublicUser `gorm:"foreignKey:ReporterID" json:"reporter,omitempty"`
 }
 
 type VerificationCode struct {
@@ -577,13 +600,17 @@ type PasswordReset struct {
 }
 
 type StudySession struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID         uuid.UUID `json:"user_id"`
-	SpaceID        uuid.UUID `json:"space_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// ⚠️ Sem `type:uuid` estas colunas nasciam como TEXT no Postgres: todo JOIN
+	// com users/spaces falhava por incompatibilidade de tipo e os índices ficavam
+	// grandes e lentos. É a tabela mais consultada do sistema (toda a analítica
+	// passa por aqui), então o índice composto abaixo é o que segura o pico.
+	UserID         uuid.UUID `gorm:"type:uuid;not null;index:idx_session_user_date,priority:1" json:"user_id"`
+	SpaceID        uuid.UUID `gorm:"type:uuid;index" json:"space_id"`
 	ActivityName   string    `json:"activity_name"`
 	PlannedMinutes int       `json:"planned_minutes"` // Os 60 min que o Back sugeriu
 	ActualMinutes  int       `json:"actual_duration"` // Os 180 min que ele fez
-	CreatedAt      time.Time `json:"created_at"`
+	CreatedAt      time.Time `gorm:"index:idx_session_user_date,priority:2" json:"created_at"`
 }
 
 // ==========================================================
@@ -726,8 +753,8 @@ type Flashcard struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Isso aqui faz o GORM trazer Nome/Foto de quem criou automaticamente!
-	Creator *User `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"`
+	// Traz só Nome/Apelido/Foto de quem criou — nunca CPF ou e-mail.
+	Creator *PublicUser `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"`
 }
 
 // ==========================================================
@@ -743,7 +770,7 @@ type QuestionGroup struct {
 	ColorHex    string    `gorm:"size:7;default:'#3B82F6'" json:"color_hex"`
 	CreatedAt   time.Time `json:"created_at"`
 
-	Creator *User `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"` // 👈 Novo: Traz a foto e o nome pro Front
+	Creator *PublicUser `gorm:"foreignKey:CreatedByID" json:"creator,omitempty"` // só nome/apelido/foto
 }
 
 // ==========================================================

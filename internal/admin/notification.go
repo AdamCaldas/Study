@@ -12,6 +12,45 @@ import (
 	"github.com/google/uuid"
 )
 
+// ==========================================================
+// 📢 A CONSULTA DO MURAL DE AVISOS (uma só, usada no app e no bootstrap)
+// ==========================================================
+// Traz os avisos ativos, dentro da validade e AINDA NÃO LIDOS pelo usuário.
+//
+// O público `SPACES` é o do Megafone do professor: o aviso é gravado com os
+// ids das turmas em target_ids. Sem este trecho, o professor disparava, o
+// sistema confirmava sucesso e NENHUM aluno recebia.
+//
+// Ordem dos parâmetros:
+//
+//	1 userID (join de lidas) · 2 userID entre aspas (target_ids USERS)
+//	3 isNewUser · 4 isNewUser · 5 userID (turmas onde é membro) · 6 userID (turmas que possui)
+const NotificationFeedSQL = `
+	SELECT n.* FROM notifications n
+	LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
+	WHERE n.is_active = true
+	  AND n.start_at <= NOW()
+	  AND (n.end_at IS NULL OR n.end_at > NOW())
+	  AND nr.id IS NULL
+	  AND (
+		n.audience = 'GLOBAL'
+		OR (n.audience = 'USERS' AND n.target_ids::jsonb @> ?)
+		OR (n.audience = 'NEW_USERS' AND ? = true)
+		OR (n.audience = 'VETERANS'  AND ? = false)
+		OR (n.audience = 'SPACES' AND EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements_text(n.target_ids::jsonb) AS t(space_id)
+			WHERE t.space_id IN (
+				SELECT sp.space_id::text FROM space_permissions sp WHERE sp.user_id = ?
+				UNION
+				SELECT s.id::text       FROM spaces s            WHERE s.owner_id = ?
+			)
+		))
+	  )
+	ORDER BY n.created_at DESC
+	LIMIT 50
+`
+
 // Estrutura do JSON que você vai mandar para criar/editar
 type NotificationInput struct {
 	Title     string   `json:"title" binding:"required"`
@@ -145,21 +184,14 @@ func GetMyNotifications(c *gin.Context) {
 	var notifications []models.Notification
 
 	// ⏳ A QUERY MÁGICA ATUALIZADA COM FILTROS DE TEMPO E PÚBLICO-ALVO
-	database.DB.Raw(`
-		SELECT n.* FROM notifications n
-		LEFT JOIN notification_reads nr ON n.id = nr.notification_id AND nr.user_id = ?
-		WHERE n.is_active = true 
-		AND n.start_at <= NOW() -- Só aparece se a data inicial já chegou
-		AND (n.end_at IS NULL OR n.end_at > NOW()) -- Não tem validade, ou ainda não venceu
-		AND nr.id IS NULL -- Só traz as que ele AINDA NÃO LEU!
-		AND (
-			n.audience = 'GLOBAL' 
-			OR (n.audience = 'USERS' AND n.target_ids::jsonb @> ?)
-			OR (n.audience = 'NEW_USERS' AND ? = true)  -- 👈 Só para calouros
-			OR (n.audience = 'VETERANS' AND ? = false)  -- 👈 Só para veteranos
-		)
-		ORDER BY n.created_at DESC
-	`, userID, `"`+userID+`"`, isNewUser, isNewUser).Scan(&notifications)
+	database.DB.Raw(NotificationFeedSQL,
+		userID,
+		`"`+userID+`"`,
+		isNewUser,
+		isNewUser,
+		userID, // 📢 megafone: turmas das quais este usuário participa
+		userID,
+	).Scan(&notifications)
 
 	if notifications == nil {
 		notifications = []models.Notification{} // Para não devolver null pro Front-end

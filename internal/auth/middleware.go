@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"studfy-backend/internal/models"
+	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import adicionado
 
@@ -78,6 +79,11 @@ func AuthMiddleware(jwks *keyfunc.JWKS) gin.HandlerFunc {
 				return
 			}
 		}
+
+		// 🔥 Registra a presença do dia e atualiza a ofensiva (streak).
+		// Só toca no banco uma vez por hora por usuário — nas demais requisições
+		// é apenas uma consulta em memória.
+		users.TouchDailyActivity(userID)
 
 		// O AuthMiddleware é a ÚNICA função do sistema inteiro que "Seta" o ID!
 		c.Set("userID", userID)

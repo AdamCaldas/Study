@@ -277,6 +277,10 @@ func main() {
 		godMode.GET("/reports/plans", admin.GetUsersByPlan)
 		godMode.GET("/reports/ranking", admin.GetTopUsersXP)
 		godMode.GET("/reports/moods", admin.GetMoodStats)
+		// Relatórios que existiam no código mas não tinham rota (ninguém acessava).
+		godMode.GET("/reports/retention", admin.GetPlatformRetentionReport)
+		godMode.GET("/reports/plan-distribution", admin.GetPlanDistributionReport)
+		godMode.GET("/reports/health", admin.GetPlatformHealthStats)
 		godMode.GET("/users", admin.ListAllUsers)
 		godMode.PUT("/users/:id", admin.UpdateAnyUser)
 		godMode.PUT("/users/:id/password", admin.ForceChangePassword)

@@ -5,33 +5,48 @@ import (
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ListAllUsers - Traz todos os usuários da base (com opção de busca)
+// ListAllUsers - Traz os usuários da base paginados (com opção de busca).
+// Antes devolvia a base INTEIRA (com CPF/CNPJ) num único JSON.
 func ListAllUsers(c *gin.Context) {
 	// Pega o termo de busca da URL (ex: /users?search=adam)
 	search := c.Query("search")
+	p := utils.GetPage(c)
 
-	var users []models.User
 	query := database.DB.Model(&models.User{})
 
 	// Se o Admin digitou algo na busca, filtra por Nome, Email ou CPF
 	if search != "" {
-		query = query.Where("full_name ILIKE ? OR email ILIKE ? OR cpf ILIKE ?", "%"+search+"%", "%"+search+"%", "%"+search+"%")
+		like := "%" + search + "%"
+		query = query.Where("full_name ILIKE ? OR email ILIKE ? OR cpf ILIKE ?", like, like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao contar usuários"})
+		return
 	}
 
 	// Faz a busca ocultando a senha por segurança, ordenando pelos mais recentes
-	if err := query.Omit("Password").Order("created_at desc").Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar usuários", "detalhe": err.Error()})
+	var users []models.User
+	if err := query.Omit("Password").
+		Order("created_at desc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar usuários"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total": len(users),
-		"users": users,
+		"total":      total,
+		"users":      users,
+		"pagination": p.Meta(total),
 	})
 }
 

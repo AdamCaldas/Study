@@ -72,12 +72,20 @@ func GetPlanDistributionReport(c *gin.Context) {
 	}
 	var stats []PlanStats
 
-	// Agrupa e conta os usuários pelo tipo de plano
-	database.DB.Table("users").
-		Select("plan_type, COUNT(*) as total").
+	// Agrupa e conta os usuários pelo tipo de plano.
+	// ⚠️ A coluna é `subscription_type` — `plan_type` não existe e quebrava a consulta.
+	if err := database.DB.Table("users").
+		Select("subscription_type as plan_type, COUNT(*) as total").
 		Where("deleted_at IS NULL").
-		Group("plan_type").
-		Scan(&stats)
+		Group("subscription_type").
+		Scan(&stats).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar a distribuição de planos."})
+		return
+	}
+
+	if stats == nil {
+		stats = []PlanStats{}
+	}
 
 	response := gin.H{"plans": stats}
 	cache.AppCache.Set(cacheKey, response, 1*time.Hour)
