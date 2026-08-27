@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"studfy-backend/internal/activity"
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/models"
+	"studfy-backend/pkg/cache"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils"
 
@@ -389,6 +391,8 @@ func CreatePageDoubt(c *gin.Context) {
 		return
 	}
 
+	activity.Log(parsedSpaceID, studentID, "enviou uma dúvida")
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Dúvida enviada ao professor!",
 		"doubt":   newDoubt,
@@ -636,15 +640,23 @@ func RegisterAttendance(c *gin.Context) {
 		return
 	}
 
-	// 4. Salva a presença do aluno
+	// 4. Salva a presença do aluno.
+	// O índice UNIQUE (session_id, student_id) é a trava real contra dois
+	// cliques simultâneos: se o insert falhar por duplicidade, o XP NÃO é dado
+	// de novo (antes dava para ganhar +10 XP várias vezes na mesma chamada).
 	record := models.AttendanceRecord{
 		SessionID: session.ID,
 		StudentID: studentID,
 	}
-	database.DB.Create(&record)
+	if err := database.DB.Create(&record).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "Sua presença já estava confirmada!"})
+		return
+	}
 
 	// Bônus: Dá um XPzinho pro aluno por ter ido na aula!
 	database.DB.Model(&models.User{}).Where("id = ?", studentID).Update("xp", gorm.Expr("xp + ?", 10))
+
+	activity.Log(session.SpaceID, studentID, "registrou presença na aula")
 
 	c.JSON(http.StatusOK, gin.H{"message": "Presença confirmada com sucesso! +10 XP"})
 }
@@ -965,6 +977,18 @@ func GetSpaceDetails(c *gin.Context) {
 	if err := database.DB.Where("id = ?", spaceID).First(&space).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
 		return
+	}
+
+	// 👁️ Conta a visita. O campo `view_count` era exibido no painel do professor
+	// mas nunca era incrementado — ficava zerado para sempre.
+	// Só conta uma vez por usuário a cada 30 min, senão cada F5 inflaria o número
+	// e viraria uma escrita no banco a cada abertura de tela.
+	viewKey := "spaceview:" + spaceID + ":" + loggedUserID.String()
+	if _, seen := cache.AppCache.Get(viewKey); !seen {
+		cache.AppCache.Set(viewKey, true, 30*time.Minute)
+		database.DB.Model(&models.Space{}).Where("id = ?", space.ID).
+			Update("view_count", gorm.Expr("view_count + 1"))
+		space.ViewCount++
 	}
 
 	var owner models.User

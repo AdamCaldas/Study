@@ -125,6 +125,11 @@ func main() {
 
 		protected.GET("/questions/studfy", study.ListStudfyQuestions)
 
+		// 🧠 Curva de esquecimento: a fila de revisões do aluno e a conclusão
+		// (que agenda a próxima com intervalo maior).
+		protected.GET("/reviews", study.ListMyReviews)
+		protected.POST("/reviews/:review_id/complete", study.CompleteReview)
+
 		protected.GET("/notifications", admin.GetMyNotifications)
 		protected.POST("/notifications/:id/read", admin.MarkNotificationAsRead)
 		protected.POST("/bugs", admin.ReportBug)

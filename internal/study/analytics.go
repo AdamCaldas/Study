@@ -226,12 +226,24 @@ func GetPendingReviewsReport(c *gin.Context) {
 	}
 	var reviews []ReviewResult
 
+	// Agora a revisão tem dono (reviews.user_id): antes era preciso adivinhar
+	// pelo autor da página, o que ignorava revisões de material de outra pessoa.
 	database.DB.Table("reviews").
 		Select("DATE(review_date) as date, count(*) as count").
-		Joins("JOIN pages ON pages.id = reviews.note_id"). // Ajuste conforme seu modelo de anotação
-		Where("pages.created_by_id = ? AND status = 'pendente' AND review_date BETWEEN ? AND ?", userID, today, nextWeek).
+		Where("user_id = ? AND status = 'pendente' AND review_date BETWEEN ? AND ?", userID, today, nextWeek).
 		Group("DATE(review_date)").
+		Order("date ASC").
 		Scan(&reviews)
 
-	c.JSON(http.StatusOK, gin.H{"upcoming_reviews": reviews})
+	// Quantas já estão vencidas (o aluno está devendo)
+	var overdue int64
+	database.DB.Model(&models.Review{}).
+		Where("user_id = ? AND status = 'pendente' AND review_date < ?", userID, today).
+		Count(&overdue)
+
+	if reviews == nil {
+		reviews = []ReviewResult{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"upcoming_reviews": reviews, "overdue_count": overdue})
 }

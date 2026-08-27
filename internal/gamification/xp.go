@@ -234,9 +234,11 @@ func CompleteFlashMission(c *gin.Context) {
 		MissionID: mission.ID,
 		UserID:    userID,
 	}
+	// O índice UNIQUE (mission_id, user_id) é a trava real: com dois cliques
+	// simultâneos, o segundo insert falha aqui e o XP não é concedido em dobro.
 	if err := tx.Create(&completion).Error; err != nil {
 		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registar conclusão."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Já resgatou o prémio desta missão!"})
 		return
 	}
 

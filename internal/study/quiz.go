@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"time"
 
+	"studfy-backend/internal/activity"
 	"studfy-backend/internal/auth"
 	"studfy-backend/internal/models"
+	"studfy-backend/internal/space"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import global adicionado
 
@@ -248,7 +250,21 @@ func SubmitQuiz(c *gin.Context) {
 		TotalQuestions: len(quiz.Questions),
 		Status:         status,
 	}
-	database.DB.Create(&result)
+	if err := database.DB.Create(&result).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar o resultado da prova."})
+		return
+	}
+
+	// 📜 Registra no histórico da turma (o professor vê quem entregou e quando).
+	activity.Log(quiz.SpaceID, userID, "entregou o simulado \""+quiz.Title+"\"")
+
+	// 🤖 Dispara as automações do professor (ex.: liberar caderno de reforço para
+	// quem foi mal). O motor existia pronto no código mas NUNCA era chamado:
+	// o professor criava a regra e nada acontecia. Só faz sentido quando a nota
+	// já é final — provas com questão dissertativa esperam a correção.
+	if status == "completed" {
+		space.RunAutomationEngine(quiz.SpaceID, userID, totalScore)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Prova finalizada com sucesso!",
@@ -395,7 +411,19 @@ func ClaimCertificate(c *gin.Context) {
 		UserID:       userID,
 		AverageScore: average,
 	}
-	database.DB.Create(&newCert)
+	// O índice UNIQUE (space_id, user_id) impede dois certificados para o mesmo
+	// aluno na mesma turma quando ele clica duas vezes seguidas.
+	if err := database.DB.Create(&newCert).Error; err != nil {
+		var existing models.Certificate
+		if database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).First(&existing).Error == nil {
+			c.JSON(http.StatusOK, gin.H{"message": "Você já possui este certificado!", "certificate": existing})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao emitir o certificado."})
+		return
+	}
+
+	activity.Log(parsedSpaceID, userID, "conquistou o certificado da turma")
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":     "Parabéns! Você concluiu o curso com sucesso.",

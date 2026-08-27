@@ -305,12 +305,21 @@ type SpaceTag struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// REVIEW — curva de esquecimento (repetição espaçada)
+// Cada linha é "revisar a página X no dia Y". Ao concluir, o sistema agenda a
+// próxima revisão com o intervalo maior (1 → 3 → 7 → 15 → 30 → 60 dias).
 type Review struct {
-	ID         uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	NoteID     uuid.UUID `gorm:"type:uuid;index;constraint:OnDelete:CASCADE" json:"note_id"`
-	ReviewDate time.Time `json:"review_date"`
-	Status     string    `gorm:"size:20;not null" json:"status"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID     uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	NoteID uuid.UUID `gorm:"type:uuid;index;not null;index:idx_review_note_user,priority:1" json:"note_id"`
+	// UserID faltava: sem ele não dava para saber de quem era a revisão, e o
+	// relatório precisava adivinhar pelo autor da página.
+	UserID     uuid.UUID `gorm:"type:uuid;index;index:idx_review_note_user,priority:2" json:"user_id"`
+	ReviewDate time.Time `gorm:"index" json:"review_date"`
+	Status     string    `gorm:"size:20;not null;default:'pendente'" json:"status"` // pendente | concluida
+	// Stage é o degrau atual na escada de intervalos (0 = primeira revisão).
+	Stage       int        `gorm:"default:0" json:"stage"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 type Quiz struct {
