@@ -401,15 +401,24 @@ func CreatePageDoubt(c *gin.Context) {
 func ListSpaceDoubts(c *gin.Context) {
 	spaceID := c.Param("space_id")
 
+	p := utils.GetPage(c)
+
+	var total int64
+	database.DB.Model(&models.PageDoubt{}).Where("space_id = ?", spaceID).Count(&total)
+
 	var doubts []models.PageDoubt
 	// Ordena para mostrar as não resolvidas primeiro, e as mais antigas no topo
-	database.DB.Where("space_id = ?", spaceID).Order("resolved asc, created_at asc").Find(&doubts)
+	database.DB.Where("space_id = ?", spaceID).
+		Order("resolved asc, created_at asc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&doubts)
 
 	if doubts == nil {
 		doubts = []models.PageDoubt{}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"doubts": doubts})
+	c.JSON(http.StatusOK, gin.H{"doubts": doubts, "pagination": p.Meta(total)})
 }
 
 // ==========================================================
@@ -859,12 +868,51 @@ func ExportClassDiaryCSV(c *gin.Context) {
 		return
 	}
 
-	// 2. Busca todos os Alunos desta Sala (Nível VIEWER)
-	var students []models.User
-	database.DB.Table("users").
-		Joins("JOIN space_permissions ON space_permissions.user_id = users.id").
-		Where("space_permissions.space_id = ? AND space_permissions.access_level = 'VIEWER'", spaceID).
-		Find(&students)
+	// 2. Monta o diário INTEIRO numa única consulta.
+	// ⚠️ Antes eram 2 consultas por aluno dentro de um laço (N+1): com 1000
+	// alunos, um único clique disparava ~2 mil consultas e travava o pool de
+	// conexões — derrubando quem estivesse usando o app naquele momento.
+	type diaryRow struct {
+		FullName  string
+		Email     string
+		XP        int
+		Presences int
+		Average   float64
+	}
+	var rows []diaryRow
+
+	err := database.DB.Raw(`
+		SELECT
+			u.full_name,
+			u.email,
+			u.xp,
+			COALESCE(att.total, 0)   AS presences,
+			COALESCE(qr.average, 0)  AS average
+		FROM space_permissions sp
+		JOIN users u ON u.id = sp.user_id
+		LEFT JOIN (
+			SELECT ar.student_id, COUNT(*) AS total
+			FROM attendance_records ar
+			JOIN attendance_sessions s ON s.id = ar.session_id
+			WHERE s.space_id = ?
+			GROUP BY ar.student_id
+		) att ON att.student_id = sp.user_id
+		LEFT JOIN (
+			SELECT user_id, AVG(score) AS average
+			FROM quiz_results
+			WHERE space_id = ? AND status = 'completed'
+			GROUP BY user_id
+		) qr ON qr.user_id = sp.user_id
+		WHERE sp.space_id = ?
+		  AND sp.access_level = 'VIEWER'
+		  AND u.deleted_at IS NULL
+		ORDER BY u.full_name ASC
+	`, spaceID, spaceID, spaceID).Scan(&rows).Error
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar o diário de classe."})
+		return
+	}
 
 	// 3. Prepara o Arquivo CSV na Memória RAM
 	b := &bytes.Buffer{}
@@ -873,34 +921,14 @@ func ExportClassDiaryCSV(c *gin.Context) {
 	// 4. Escreve o Cabeçalho da Planilha (Linha 1)
 	writer.Write([]string{"Nome do Aluno", "Email", "XP Acumulado", "Total de Presencas", "Media Geral (Provas)"})
 
-	// 5. Preenche os dados aluno por aluno
-	for _, student := range students {
-		// Calcula as presenças
-		var presences int64
-		database.DB.Table("attendance_records").
-			Joins("JOIN attendance_sessions ON attendance_sessions.id = attendance_records.session_id").
-			Where("attendance_sessions.space_id = ? AND attendance_records.student_id = ?", spaceID, student.ID).
-			Count(&presences)
-
-		// Calcula a Média Geral
-		var results []models.QuizResult
-		database.DB.Where("space_id = ? AND user_id = ? AND status = 'completed'", spaceID, student.ID).Find(&results)
-		var totalScore float64 = 0
-		var average float64 = 0
-		if len(results) > 0 {
-			for _, r := range results {
-				totalScore += r.Score
-			}
-			average = totalScore / float64(len(results))
-		}
-
-		// Escreve a linha do aluno na planilha
+	// 5. Preenche os dados (já vieram prontos do banco)
+	for _, r := range rows {
 		writer.Write([]string{
-			student.FullName,
-			student.Email,
-			fmt.Sprintf("%d", student.XP),
-			fmt.Sprintf("%d", presences),
-			fmt.Sprintf("%.2f", average),
+			r.FullName,
+			r.Email,
+			fmt.Sprintf("%d", r.XP),
+			fmt.Sprintf("%d", r.Presences),
+			fmt.Sprintf("%.2f", r.Average),
 		})
 	}
 

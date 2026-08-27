@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // Estrutura para receber os dados do Front-end
@@ -134,29 +135,47 @@ func ListFlashcards(c *gin.Context) {
 	tag := c.Query("tag") // 👈 Filtro por Tag (Ex: ?tag=CESPE)
 	searchQuery := c.Query("search")
 
-	query := database.DB.Preload("Creator").Where("space_id = ?", parsedSpaceID)
+	// Os filtros são montados uma vez e reaproveitados na contagem e na busca.
+	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("space_id = ?", parsedSpaceID)
+		if groupID != "" {
+			q = q.Where("group_id = ?", groupID)
+		}
+		if category != "" {
+			q = q.Where("category = ?", category)
+		}
+		if subCategory != "" {
+			q = q.Where("sub_category = ?", subCategory)
+		}
+		if tag != "" {
+			// Pesquisa dentro do Array JSONB se a tag existe!
+			q = q.Where("tags ILIKE ?", "%\""+tag+"\"%")
+		}
+		if searchQuery != "" {
+			like := "%" + searchQuery + "%"
+			q = q.Where("title ILIKE ? OR front ILIKE ?", like, like)
+		}
+		return q
+	}
 
-	if groupID != "" {
-		query = query.Where("group_id = ?", groupID)
-	}
-	if category != "" {
-		query = query.Where("category = ?", category)
-	}
-	if subCategory != "" {
-		query = query.Where("sub_category = ?", subCategory)
-	}
-	if tag != "" {
-		// Pesquisa dentro do Array JSONB se a tag existe!
-		query = query.Where("tags ILIKE ?", "%\""+tag+"\"%")
-	}
-	if searchQuery != "" {
-		query = query.Where("title ILIKE ? OR front ILIKE ?", "%"+searchQuery+"%", "%"+searchQuery+"%")
-	}
+	// 📄 Paginado: uma turma com milhares de cards derrubava o app do aluno.
+	p := utils.GetPage(c)
+
+	var total int64
+	applyFilters(database.DB.Model(&models.Flashcard{})).Count(&total)
 
 	var flashcards []models.Flashcard
-	query.Order("created_at desc").Find(&flashcards)
+	applyFilters(database.DB.Preload("Creator")).
+		Order("created_at desc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&flashcards)
 
-	c.JSON(http.StatusOK, gin.H{"flashcards": flashcards})
+	if flashcards == nil {
+		flashcards = []models.Flashcard{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"flashcards": flashcards, "pagination": p.Meta(total)})
 }
 
 // ==========================================================

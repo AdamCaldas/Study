@@ -802,6 +802,9 @@ func ExecutePlanBlock(c *gin.Context) {
 
 	tx.Commit()
 
+	// O aluno acabou de estudar: os painéis dele mudaram.
+	InvalidateUserDashboard(userID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":        "Tempo de cronograma registrado com sucesso!",
 		"actual_minutes": duration,

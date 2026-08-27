@@ -449,6 +449,9 @@ func AdvanceCycleStep(c *gin.Context) {
 
 	tx.Commit()
 
+	// O aluno acabou de estudar: os painéis dele mudaram.
+	InvalidateUserDashboard(userID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":          "Tempo e dívidas acumulados com sucesso!",
 		"actual_minutes":   input.ActualDuration,

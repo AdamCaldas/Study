@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -31,12 +33,21 @@ func GetSpaceHistory(c *gin.Context) {
 		CreatedAt time.Time
 	}
 
+	// 📄 Paginado: o histórico cresce para sempre; sem limite, a tela do professor
+	// travava depois de alguns meses de turma.
+	p := utils.GetPage(c)
+
+	var total int64
+	database.DB.Model(&models.ActivityLog{}).Where("space_id = ?", spaceID).Count(&total)
+
 	// Busca os logs fazendo JOIN com users para pegar o nome de quem fez a ação
 	err := database.DB.Table("activity_logs").
 		Select("activity_logs.id, users.full_name, activity_logs.action, activity_logs.created_at").
 		Joins("left join users on users.id = activity_logs.user_id").
 		Where("activity_logs.space_id = ?", spaceID).
 		Order("activity_logs.created_at desc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
 		Scan(&logs).Error
 
 	if err != nil {
@@ -60,5 +71,5 @@ func GetSpaceHistory(c *gin.Context) {
 		response = []HistoryResponse{}
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gin.H{"history": response, "pagination": p.Meta(total)})
 }

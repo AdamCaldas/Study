@@ -72,6 +72,17 @@ func GetPersonalDashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, responseData)
 }
 
+// InvalidateUserDashboard limpa os relatórios em cache do aluno.
+// Chamado sempre que ele registra estudo — sem isso, ele terminava uma sessão,
+// voltava ao painel e via os números antigos por até 5 minutos, parecendo que o
+// app não tinha salvo nada.
+func InvalidateUserDashboard(userID uuid.UUID) {
+	id := userID.String()
+	cache.AppCache.Delete("dashboard_" + id)
+	cache.AppCache.Delete("heatmap_" + id)
+	cache.AppCache.Delete("strengths_" + id)
+}
+
 // ==========================================================
 // 📊 2. RELATÓRIO DA TURMA/SPACE (O Olho de Deus)
 // ==========================================================

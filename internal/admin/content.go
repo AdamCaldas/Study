@@ -4,23 +4,32 @@ import (
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
 // ListAllSpaces - Visão de Raio-X: Vê TODOS os Spaces do banco de dados
 func ListAllSpaces(c *gin.Context) {
-	var spaces []models.Space
+	p := utils.GetPage(c)
 
-	// Busca todos os spaces ordenados pelos criados mais recentemente
-	if err := database.DB.Order("created_at desc").Find(&spaces).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar Spaces", "detalhe": err.Error()})
+	var total int64
+	database.DB.Model(&models.Space{}).Count(&total)
+
+	// Busca os spaces ordenados pelos criados mais recentemente (paginado)
+	var spaces []models.Space
+	if err := database.DB.Order("created_at desc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&spaces).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar Spaces"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total":  len(spaces),
-		"spaces": spaces,
+		"total":      total,
+		"spaces":     spaces,
+		"pagination": p.Meta(total),
 	})
 }
 

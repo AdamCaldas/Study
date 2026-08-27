@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"studfy-backend/internal/auth"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import global
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type SpaceQuestionInput struct {
@@ -85,17 +87,38 @@ func ListSpaceQuestions(c *gin.Context) {
 	}
 
 	groupID := c.Query("group_id")
+	p := utils.GetPage(c)
 
-	query := database.DB.Where("space_id = ?", parsedSpaceID)
-
-	if groupID != "" {
-		query = query.Where("group_id = ?", groupID)
+	applyFilters := func(q *gorm.DB) *gorm.DB {
+		q = q.Where("space_id = ?", parsedSpaceID)
+		if groupID != "" {
+			q = q.Where("group_id = ?", groupID)
+		}
+		return q
 	}
 
-	var questions []models.SpaceQuestion
-	query.Order("created_at DESC").Find(&questions)
+	var total int64
+	applyFilters(database.DB.Model(&models.SpaceQuestion{})).Count(&total)
 
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
+	var questions []models.SpaceQuestion
+	applyFilters(database.DB).
+		Order("created_at DESC").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&questions)
+
+	if questions == nil {
+		questions = []models.SpaceQuestion{}
+	}
+
+	// 🔒 Banco de questões da turma: o gabarito só sai para quem monta as provas.
+	if !auth.CanSeeQuizAnswers(c) {
+		for i := range questions {
+			questions[i].CorrectAnswer = ""
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"questions": questions, "pagination": p.Meta(total)})
 }
 
 // ==========================================================

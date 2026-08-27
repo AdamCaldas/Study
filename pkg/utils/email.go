@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 // Estruturas exigidas pela API do Brevo
@@ -27,6 +28,12 @@ type BrevoEmailRequest struct {
 	Subject     string           `json:"subject"`
 	HtmlContent string           `json:"htmlContent"`
 }
+
+// ⏱️ Cliente HTTP compartilhado COM TIMEOUT.
+// Antes cada envio criava um `http.Client{}` sem prazo: se o Brevo travasse, a
+// rotina ficava presa na memória para sempre (vazamento a cada cadastro).
+// Reaproveitar o mesmo cliente também reusa as conexões TCP.
+var brevoClient = &http.Client{Timeout: 10 * time.Second}
 
 // O Motor de Envio via API do Brevo
 func SendEmailViaBrevo(toEmail, subject, htmlBody string) {
@@ -67,8 +74,7 @@ func SendEmailViaBrevo(toEmail, subject, htmlBody string) {
 	req.Header.Set("api-key", apiKey)
 	req.Header.Set("content-type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := brevoClient.Do(req)
 	if err != nil {
 		log.Println("Erro ao conectar na API do Brevo:", err)
 		return

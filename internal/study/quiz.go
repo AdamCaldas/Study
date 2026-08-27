@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"studfy-backend/internal/auth"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import global adicionado
@@ -87,20 +88,81 @@ func ListSpaceQuizzes(c *gin.Context) {
 		return
 	}
 
+	// 📄 Paginado: antes esta rota devolvia TODOS os simulados da turma com TODAS
+	// as questões de cada um embutidas. Uma turma com 40 provas de 50 questões
+	// mandava 2 mil registros para cada aluno que abrisse a aba.
+	p := utils.GetPage(c)
+
+	base := database.DB.Model(&models.Quiz{}).Where("space_id = ?", parsedSpaceID)
+
+	var total int64
+	base.Count(&total)
+
+	// `with_questions=true` para quem realmente precisa do conteúdo (responder a
+	// prova). A listagem normal traz só a capa: título, descrição e o total.
+	withQuestions := c.Query("with_questions") == "true"
+
+	query := database.DB.Where("space_id = ?", parsedSpaceID)
+	if withQuestions {
+		query = query.Preload("Questions")
+	}
+
 	var quizzes []models.Quiz
-	// O Preload traz as perguntas embutidas no JSON
-	database.DB.Preload("Questions").Where("space_id = ?", parsedSpaceID).Find(&quizzes)
+	query.Order("created_at desc").
+		Offset(p.Offset()).
+		Limit(p.Limit).
+		Find(&quizzes)
+
+	// Conta as questões de cada simulado numa única consulta (evita N+1).
+	counts := map[uuid.UUID]int{}
+	if len(quizzes) > 0 {
+		ids := make([]uuid.UUID, 0, len(quizzes))
+		for _, q := range quizzes {
+			ids = append(ids, q.ID)
+		}
+		var rows []struct {
+			QuizID uuid.UUID
+			Total  int
+		}
+		database.DB.Model(&models.QuizQuestion{}).
+			Select("quiz_id, COUNT(*) as total").
+			Where("quiz_id IN ?", ids).
+			Group("quiz_id").
+			Scan(&rows)
+		for _, r := range rows {
+			counts[r.QuizID] = r.Total
+		}
+	}
+
+	// 🔒 O gabarito só pode sair para quem corrige a prova. Antes, qualquer aluno
+	// que listasse os simulados recebia `correct_answer` de todas as questões.
+	isStaff := auth.CanSeeQuizAnswers(c)
 
 	now := time.Now()
+	type quizResponse struct {
+		models.Quiz
+		QuestionCount int `json:"question_count"`
+	}
+	response := make([]quizResponse, 0, len(quizzes))
+
 	for i := range quizzes {
 		// Regra de Trava de Tempo (Simulados agendados)
 		if quizzes[i].UnlockAt != nil && quizzes[i].UnlockAt.After(now) {
 			quizzes[i].IsLocked = true
 			quizzes[i].Questions = []models.QuizQuestion{} // Esconde as perguntas até a data!
 		}
+		if !isStaff {
+			for j := range quizzes[i].Questions {
+				quizzes[i].Questions[j].CorrectAnswer = ""
+			}
+		}
+		response = append(response, quizResponse{
+			Quiz:          quizzes[i],
+			QuestionCount: counts[quizzes[i].ID],
+		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"quizzes": quizzes})
+	c.JSON(http.StatusOK, gin.H{"quizzes": response, "pagination": p.Meta(total)})
 }
 
 // ==========================================================

@@ -1,9 +1,11 @@
 package database
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"studfy-backend/internal/models"
@@ -12,6 +14,26 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// withStatementTimeout injeta o statement_timeout do Postgres na string de
+// conexão, respeitando o formato usado (URL ou "chave=valor").
+func withStatementTimeout(dsn string, ms int) string {
+	if ms <= 0 || strings.Contains(dsn, "statement_timeout") {
+		return dsn
+	}
+
+	// Formato URL: postgres://user:pass@host/db?sslmode=disable
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		return fmt.Sprintf("%s%soptions=-c%%20statement_timeout%%3D%d", dsn, sep, ms)
+	}
+
+	// Formato chave=valor: host=... user=... dbname=...
+	return fmt.Sprintf("%s options='-c statement_timeout=%d'", dsn, ms)
+}
 
 // envInt lê um inteiro do ambiente, com padrão seguro.
 func envInt(key string, def int) int {
@@ -30,6 +52,12 @@ func ConnectDB() {
 	if dsn == "" {
 		log.Fatal("Erro: DATABASE_URL não encontrada no arquivo .env")
 	}
+
+	// ⏱️ PRAZO MÁXIMO POR CONSULTA (protege o pool inteiro)
+	// Sem isto, UMA consulta lenta segura a conexão indefinidamente; num pico,
+	// poucas travadas consomem o pool e todos os alunos recebem erro.
+	// O próprio Postgres derruba a consulta passando do limite.
+	dsn = withStatementTimeout(dsn, envInt("DB_STATEMENT_TIMEOUT_MS", 15000))
 
 	// Iniciamos a conexão com o logger apenas para avisos críticos para não poluir o terminal
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{

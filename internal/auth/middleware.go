@@ -346,6 +346,20 @@ func RequireSpaceEditInfo() gin.HandlerFunc {
 		"Você não tem permissão para alterar as configurações desta turma.")
 }
 
+// CanSeeQuizAnswers diz se quem está na requisição pode ver o gabarito das
+// questões (dono da turma, monitor/editor ou quem gerencia simulados).
+// O aluno NUNCA pode: a resposta certa é removida antes de sair.
+func CanSeeQuizAnswers(c *gin.Context) bool {
+	if IsSpaceOwner(c) {
+		return true
+	}
+	perm, ok := SpacePermissionFromCtx(c)
+	if !ok {
+		return false
+	}
+	return perm.CanManageQuizzes || perm.CanEditContent || isEditorOrMonitor(perm)
+}
+
 // RequireSpaceStaff libera o dono, monitores/editores e quem gerencia conteúdo —
 // usado nas telas de professor (dúvidas, termômetro, relatórios da turma).
 func RequireSpaceStaff() gin.HandlerFunc {
