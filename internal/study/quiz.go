@@ -127,6 +127,28 @@ func SubmitQuiz(c *gin.Context) {
 		return
 	}
 
+	// 🛡️ O simulado tem que ser desta turma (evita responder prova de outro Space).
+	if spaceIDStr := c.Param("space_id"); spaceIDStr != "" {
+		if parsedSpaceID, err := uuid.Parse(spaceIDStr); err == nil && quiz.SpaceID != parsedSpaceID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Este simulado não pertence a esta turma."})
+			return
+		}
+	}
+
+	// 🔒 Trava de agendamento: não dá pra responder antes de liberar.
+	if quiz.UnlockAt != nil && quiz.UnlockAt.After(time.Now()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este simulado ainda não foi liberado."})
+		return
+	}
+
+	// 🚫 Sem reenvio: uma tentativa por aluno (impede farm de nota/certificado).
+	var jaFez int64
+	database.DB.Model(&models.QuizResult{}).Where("quiz_id = ? AND user_id = ?", quiz.ID, userID).Count(&jaFez)
+	if jaFez > 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "Você já enviou este simulado."})
+		return
+	}
+
 	var input struct {
 		Answers map[string]string `json:"answers"`
 	}
@@ -183,8 +205,9 @@ func GradeQuizManual(c *gin.Context) {
 		return
 	}
 
+	// extra_points NÃO é "required" (0 é uma nota válida para questão errada).
 	var input struct {
-		ExtraPoints float64 `json:"extra_points" binding:"required"`
+		ExtraPoints float64 `json:"extra_points"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Pontuação inválida."})
@@ -195,6 +218,15 @@ func GradeQuizManual(c *gin.Context) {
 	if err := database.DB.Where("id = ?", parsedResultID).First(&result).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Resultado não encontrado."})
 		return
+	}
+
+	// 🛡️ O resultado tem que ser desta turma (o guarda de rota já exige cargo,
+	// mas isto impede corrigir prova de outra turma via result_id solto).
+	if spaceIDStr := c.Param("space_id"); spaceIDStr != "" {
+		if parsedSpaceID, err := uuid.Parse(spaceIDStr); err == nil && result.SpaceID != parsedSpaceID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Este resultado não pertence a esta turma."})
+			return
+		}
 	}
 
 	database.DB.Model(&result).Updates(map[string]interface{}{

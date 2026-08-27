@@ -3,6 +3,7 @@ package database
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"studfy-backend/internal/models"
@@ -11,6 +12,16 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// envInt lê um inteiro do ambiente, com padrão seguro.
+func envInt(key string, def int) int {
+	if s := os.Getenv(key); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
 
 var DB *gorm.DB
 
@@ -35,10 +46,17 @@ func ConnectDB() {
 		log.Fatal("Falha ao pegar a instância genérica do banco: ", err)
 	}
 
-	// 🛡️ BLINDAGEM DO POOL DE CONEXÕES
-	sqlDB.SetMaxOpenConns(50)
-	sqlDB.SetMaxIdleConns(10)
+	// 🛡️ BLINDAGEM DO POOL DE CONEXÕES (configurável por env)
+	// Padrões pensados para 1000 alunos em UMA instância. Se rodar várias
+	// réplicas, lembre que cada uma abre até DB_MAX_OPEN_CONNS conexões —
+	// some tudo e mantenha abaixo do max_connections do Postgres.
+	maxOpen := envInt("DB_MAX_OPEN_CONNS", 50)
+	maxIdle := envInt("DB_MAX_IDLE_CONNS", 15)
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute) // devolve conexões ociosas
+	log.Printf("Pool do banco: maxOpen=%d maxIdle=%d", maxOpen, maxIdle)
 
 	DB = db
 	log.Println("✅ Conexão com PostgreSQL estabelecida com sucesso!")

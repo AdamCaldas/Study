@@ -76,9 +76,11 @@ type Space struct {
 
 // SPACE PERMISSIONS
 type SpacePermission struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID     uuid.UUID `gorm:"type:uuid;primaryKey" json:"space_id"`
-	UserID      uuid.UUID `gorm:"type:uuid;primaryKey" json:"user_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Um usuário só pode ter UMA permissão por Space (evita linhas duplicadas
+	// e deixa a busca space_id+user_id usar índice).
+	SpaceID     uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_space_user" json:"space_id"`
+	UserID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_space_user" json:"user_id"`
 	AccessLevel string    `gorm:"type:varchar(20);not null" json:"access_level"`
 	JoinedAt    time.Time `gorm:"autoCreateTime" json:"joined_at"`
 
@@ -377,9 +379,10 @@ type Notification struct {
 }
 
 type NotificationRead struct {
-	ID             uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	NotificationID uuid.UUID `gorm:"type:uuid;index;not null" json:"notification_id"`
-	UserID         uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Uma marca de "lida" por usuário por notificação.
+	NotificationID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_notif_user" json:"notification_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_notif_user" json:"user_id"`
 	ReadAt         time.Time `gorm:"autoCreateTime" json:"read_at"`
 }
 
@@ -389,9 +392,10 @@ type PageTag struct {
 }
 
 type Follower struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	FollowerID  uuid.UUID `gorm:"type:uuid;index;not null" json:"follower_id"`
-	FollowingID uuid.UUID `gorm:"type:uuid;index;not null" json:"following_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Não dá pra seguir a mesma pessoa duas vezes.
+	FollowerID  uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_follower_following" json:"follower_id"`
+	FollowingID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_follower_following" json:"following_id"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -463,16 +467,18 @@ type FlashMission struct {
 }
 
 type MissionCompletion struct {
-	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	MissionID   uuid.UUID `gorm:"type:uuid;index;not null" json:"mission_id"`
-	UserID      uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Cada missão só pode ser concluída UMA vez por usuário (impede XP dobrado).
+	MissionID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mission_user" json:"mission_id"`
+	UserID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mission_user" json:"user_id"`
 	CompletedAt time.Time `gorm:"autoCreateTime" json:"completed_at"`
 }
 
 type Certificate struct {
-	ID           uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID      uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
-	UserID       uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Um certificado por aluno por turma (evita duplicidade em cliques rápidos).
+	SpaceID      uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_cert_space_user" json:"space_id"`
+	UserID       uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_cert_space_user" json:"user_id"`
 	AverageScore float64   `json:"average_score"`
 	IssuedAt     time.Time `gorm:"autoCreateTime" json:"issued_at"`
 }
@@ -501,9 +507,10 @@ type AttendanceSession struct {
 }
 
 type AttendanceRecord struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SessionID uuid.UUID `gorm:"type:uuid;index;not null" json:"session_id"`
-	StudentID uuid.UUID `gorm:"type:uuid;index;not null" json:"student_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 Uma presença por aluno por chamada (evita +10 XP duplicado).
+	SessionID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_session_student" json:"session_id"`
+	StudentID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_session_student" json:"student_id"`
 	CheckInAt time.Time `gorm:"autoCreateTime" json:"check_in_at"`
 }
 
@@ -518,9 +525,10 @@ type Badge struct {
 }
 
 type UserBadge struct {
-	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	UserID    uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
-	BadgeID   uuid.UUID `gorm:"type:uuid;index;not null" json:"badge_id"`
+	ID uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
+	// 🔒 O aluno não pode receber o mesmo emblema duas vezes.
+	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_user_badge" json:"user_id"`
+	BadgeID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_user_badge" json:"badge_id"`
 	AwardedBy uuid.UUID `gorm:"type:uuid;not null" json:"awarded_by"`
 	AwardedAt time.Time `gorm:"autoCreateTime" json:"awarded_at"`
 
@@ -555,6 +563,7 @@ type VerificationCode struct {
 	ID        uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	Email     string    `gorm:"not null;index"`
 	Code      string    `gorm:"size:6;not null"`
+	Attempts  int       `gorm:"default:0"` // tentativas erradas (trava força-bruta)
 	ExpiresAt time.Time `gorm:"not null"`
 	CreatedAt time.Time
 }

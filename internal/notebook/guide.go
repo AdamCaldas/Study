@@ -131,6 +131,12 @@ type ReorderGuidesRequest struct {
 }
 
 func ReorderGuides(c *gin.Context) {
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	var req ReorderGuidesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido."})
@@ -139,7 +145,19 @@ func ReorderGuides(c *gin.Context) {
 
 	tx := database.DB.Begin()
 	for _, g := range req.Guides {
-		if err := tx.Model(&models.Guide{}).Where("id = ?", g.GuideID).Update("order", g.Order).Error; err != nil {
+		parsedID, err := uuid.Parse(g.GuideID)
+		if err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ID de guia inválido na lista."})
+			return
+		}
+		// 🛡️ IDOR: confirma permissão em cada guia antes de mexer.
+		if !canEditGuide(parsedID, parsedUserID) {
+			tx.Rollback()
+			c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para reordenar estas guias."})
+			return
+		}
+		if err := tx.Model(&models.Guide{}).Where("id = ?", parsedID).Update("order", g.Order).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao reordenar guias"})
 			return
@@ -153,12 +171,42 @@ func ReorderGuides(c *gin.Context) {
 // 🗑️ EXCLUIR UMA GUIA
 // ==========================================================
 func DeleteGuide(c *gin.Context) {
-	guideID := c.Param("guide_id")
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
 
-	if err := database.DB.Where("id = ?", guideID).Delete(&models.Guide{}).Error; err != nil {
+	guideIDStr := c.Param("guide_id")
+	parsedGuideID, err := uuid.Parse(guideIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
+		return
+	}
+
+	// 🛡️ IDOR: só apaga se puder editar o caderno da guia.
+	if !canEditGuide(parsedGuideID, parsedUserID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para excluir esta guia."})
+		return
+	}
+
+	if err := database.DB.Where("id = ?", parsedGuideID).Delete(&models.Guide{}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir a Guia"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Guia excluída com sucesso!"})
+}
+
+// canEditGuide confirma que o usuário pode mexer no caderno dono da guia.
+func canEditGuide(guideID uuid.UUID, userID uuid.UUID) bool {
+	var guide models.Guide
+	if err := database.DB.Select("id", "notebook_id").Where("id = ?", guideID).First(&guide).Error; err != nil {
+		return false
+	}
+	var notebook models.Notebook
+	if err := database.DB.Select("id", "space_id").Where("id = ?", guide.NotebookID).First(&notebook).Error; err != nil {
+		return false
+	}
+	return canEditNotebook(notebook.SpaceID, notebook.ID, userID)
 }

@@ -3,6 +3,7 @@ package gamification
 import (
 	"net/http"
 	"studfy-backend/internal/models"
+	"studfy-backend/pkg/cache"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import inserido
 	"time"
@@ -11,6 +12,15 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// rankingRow é uma linha do ranking (usada também no cache).
+type rankingRow struct {
+	UserID     uuid.UUID `json:"user_id"`
+	FullName   string    `json:"full_name"`
+	Nickname   string    `json:"nickname"`
+	ProfilePic string    `json:"profile_picture_url"`
+	XP         int       `json:"xp"`
+}
 
 type RewardInput struct {
 	Action string `json:"action" binding:"required"`
@@ -29,7 +39,7 @@ func RewardXP(c *gin.Context) {
 
 	var input struct {
 		Action string `json:"action" binding:"required"`
-		Amount int    `json:"amount"`
+		// Amount NÃO é mais confiado: quem decide o valor é a regra no banco.
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -37,21 +47,51 @@ func RewardXP(c *gin.Context) {
 		return
 	}
 
-	xpToAward := input.Amount
-
+	// 🛡️ O servidor manda no XP: só concede se existir uma regra cadastrada
+	// para essa ação. Isso mata o exploit de mandar {"amount": 999999}.
+	var rule models.GamificationRule
+	if err := database.DB.Where("action_name = ?", input.Action).First(&rule).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Ação de XP desconhecida."})
+		return
+	}
+	xpToAward := rule.RewardXP
 	if xpToAward <= 0 {
-		var rule models.GamificationRule
-		if err := database.DB.Where("action_name = ?", input.Action).First(&rule).Error; err == nil {
-			xpToAward = rule.RewardXP
-		} else {
-			xpToAward = 5
+		c.JSON(http.StatusOK, gin.H{"message": "Nenhum XP para esta ação.", "xp_earned": 0})
+		return
+	}
+
+	// 🚦 Respeita o limite diário da regra (se houver), contando quantas vezes o
+	// usuário já ganhou XP por essa ação hoje (registrado no ActivityLog).
+	logAction := "XP:" + input.Action
+	if rule.DailyLimit > 0 {
+		now := time.Now()
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		var todayCount int64
+		database.DB.Model(&models.ActivityLog{}).
+			Where("user_id = ? AND action = ? AND created_at >= ?", userID, logAction, startOfDay).
+			Count(&todayCount)
+		if todayCount >= int64(rule.DailyLimit) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error":     "Você já atingiu o limite diário de XP para esta ação.",
+				"xp_earned": 0,
+			})
+			return
 		}
 	}
 
-	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpToAward)).Error; err != nil {
+	// Transação: registra o ganho (para a contagem diária) e soma o XP.
+	tx := database.DB.Begin()
+	if err := tx.Create(&models.ActivityLog{UserID: userID, Action: logAction}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao registrar XP"})
+		return
+	}
+	if err := tx.Model(&models.User{}).Where("id = ?", userID).Update("xp", gorm.Expr("xp + ?", xpToAward)).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar XP"})
 		return
 	}
+	tx.Commit()
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "XP ganho com sucesso!",
@@ -280,14 +320,20 @@ func AwardBadge(c *gin.Context) {
 		return
 	}
 
+	parsedStudentID, err := uuid.Parse(studentID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do aluno inválido."})
+		return
+	}
+
 	var existing models.UserBadge
-	if err := database.DB.Where("user_id = ? AND badge_id = ?", studentID, badgeID).First(&existing).Error; err == nil {
+	if err := database.DB.Where("user_id = ? AND badge_id = ?", parsedStudentID, badgeID).First(&existing).Error; err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Este aluno já possui este emblema no peito!"})
 		return
 	}
 
 	userBadge := models.UserBadge{
-		UserID:    uuid.MustParse(studentID),
+		UserID:    parsedStudentID,
 		BadgeID:   badge.ID,
 		AwardedBy: teacherID,
 	}
@@ -355,14 +401,18 @@ func GetSpaceRanking(c *gin.Context) {
 		return
 	}
 
-	var ranking []struct {
-		UserID     uuid.UUID `json:"user_id"`
-		FullName   string    `json:"full_name"`
-		Nickname   string    `json:"nickname"`
-		ProfilePic string    `json:"profile_picture_url"`
-		XP         int       `json:"xp"`
+	// ⚡ Cache de 30s: a query do ranking é pesada (JOIN + DISTINCT + ORDER) e
+	// TODOS os alunos abrem essa tela. 30s de atraso no ranking é irrelevante e
+	// tira uma carga enorme do banco quando 1000 pessoas olham ao mesmo tempo.
+	cacheKey := "ranking_" + spaceID
+	if cached, found := cache.AppCache.Get(cacheKey); found {
+		if rows, ok := cached.([]rankingRow); ok {
+			c.JSON(http.StatusOK, gin.H{"is_ranking_active": true, "ranking": rows})
+			return
+		}
 	}
 
+	ranking := []rankingRow{}
 	database.DB.Table("users").
 		Select("DISTINCT users.id as user_id, users.full_name, users.nickname, users.profile_pic, users.xp").
 		Joins("LEFT JOIN space_permissions ON space_permissions.user_id = users.id").
@@ -371,15 +421,7 @@ func GetSpaceRanking(c *gin.Context) {
 		Limit(50).
 		Scan(&ranking)
 
-	if ranking == nil {
-		ranking = []struct {
-			UserID     uuid.UUID `json:"user_id"`
-			FullName   string    `json:"full_name"`
-			Nickname   string    `json:"nickname"`
-			ProfilePic string    `json:"profile_picture_url"`
-			XP         int       `json:"xp"`
-		}{}
-	}
+	cache.AppCache.Set(cacheKey, ranking, 30*time.Second)
 
 	c.JSON(http.StatusOK, gin.H{
 		"is_ranking_active": space.IsRankingActive,

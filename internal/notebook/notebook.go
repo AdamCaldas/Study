@@ -191,7 +191,31 @@ func UpdateNotebook(c *gin.Context) {
 // 🗑️ DELETE NOTEBOOK (Com remoção automática do Ciclo!)
 // ==========================================================
 func DeleteNotebook(c *gin.Context) {
-	notebookID := c.Param("notebook_id")
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
+	notebookIDStr := c.Param("notebook_id")
+	parsedNotebookID, err := uuid.Parse(notebookIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Caderno inválido"})
+		return
+	}
+
+	// 🛡️ IDOR: só apaga quem pode editar o caderno.
+	var notebook models.Notebook
+	if err := database.DB.Select("id", "space_id").Where("id = ?", parsedNotebookID).First(&notebook).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
+		return
+	}
+	if !canEditNotebook(notebook.SpaceID, parsedNotebookID, parsedUserID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para apagar este caderno."})
+		return
+	}
+
+	notebookID := parsedNotebookID.String()
 
 	// 👇 A MÁGICA AQUI: Se o caderno estava no Ciclo de Estudos, apagamos o bloco dele!
 	database.DB.Where("notebook_id = ?", notebookID).Delete(&models.StudyBlock{})

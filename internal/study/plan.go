@@ -97,6 +97,14 @@ func minutesToTime(m int) string {
 	return fmt.Sprintf("%02d:%02d:00", h, mins)
 }
 
+// minutesToHHMM devolve "HH:MM" (5 chars) — o formato que as colunas start_time/
+// end_time (size:5) esperam. Usar minutesToTime aqui truncava/corrompia o valor.
+func minutesToHHMM(m int) string {
+	h := (m / 60) % 24
+	mins := m % 60
+	return fmt.Sprintf("%02d:%02d", h, mins)
+}
+
 func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
 	var totalWeight float64 = 0
 	var calculatedBlocks []models.StudyBlock
@@ -871,9 +879,23 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 }
 
 func UpdateStudyPlan(c *gin.Context) {
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 	blockID := c.Param("plan_id")
+
 	var input CreatePlanBlockInput
-	c.ShouldBindJSON(&input)
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	if !ownsStudyBlock(blockID, userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este bloco não pertence ao seu cronograma."})
+		return
+	}
 
 	database.DB.Model(&models.StudyBlock{}).Where("id = ?", blockID).Updates(map[string]interface{}{
 		"day_of_week": input.DayOfWeek,
@@ -886,9 +908,38 @@ func UpdateStudyPlan(c *gin.Context) {
 }
 
 func DeleteStudyPlan(c *gin.Context) {
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 	blockID := c.Param("plan_id")
+
+	if !ownsStudyBlock(blockID, userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este bloco não pertence ao seu cronograma."})
+		return
+	}
+
 	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
 	c.JSON(http.StatusOK, gin.H{"message": "Bloco removido"})
+}
+
+// ownsStudyBlock confirma que o bloco pertence a uma estratégia criada pelo próprio
+// usuário — evita que alguém edite/apague bloco de outra pessoa passando um ID solto.
+func ownsStudyBlock(blockID string, userID uuid.UUID) bool {
+	parsedID, err := uuid.Parse(blockID)
+	if err != nil {
+		return false
+	}
+	var block models.StudyBlock
+	if err := database.DB.Select("id", "strategy_id").Where("id = ?", parsedID).First(&block).Error; err != nil {
+		return false
+	}
+	var strategy models.StudyStrategy
+	if err := database.DB.Select("id", "created_by_id").Where("id = ?", block.StrategyID).First(&strategy).Error; err != nil {
+		return false
+	}
+	return strategy.CreatedByID == userID
 }
 
 // ==========================================================
@@ -1034,8 +1085,8 @@ func AutoFitPlanBlocks(c *gin.Context) {
 				}
 			}
 
-			startStr := minutesToTime(currentCursorMin)
-			endStr := minutesToTime(currentCursorMin + duration)
+			startStr := minutesToHHMM(currentCursorMin)
+			endStr := minutesToHHMM(currentCursorMin + duration)
 
 			database.DB.Model(&models.StudyBlock{}).Where("id = ?", block.ID).Updates(map[string]interface{}{
 				"start_time": startStr,

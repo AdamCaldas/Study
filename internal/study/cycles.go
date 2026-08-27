@@ -499,9 +499,23 @@ func CreateCycleBlock(c *gin.Context) {
 }
 
 func UpdateCycleBlock(c *gin.Context) {
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 	blockID := c.Param("block_id")
+
 	var input CreateCycleBlockInput
-	c.ShouldBindJSON(&input)
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos."})
+		return
+	}
+
+	if !ownsStudyBlock(blockID, userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este card não pertence ao seu ciclo."})
+		return
+	}
 
 	database.DB.Model(&models.StudyBlock{}).Where("id = ?", blockID).Updates(map[string]interface{}{
 		"activity":    input.Activity,
@@ -511,7 +525,18 @@ func UpdateCycleBlock(c *gin.Context) {
 }
 
 func DeleteCycleBlock(c *gin.Context) {
+	userID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Não autenticado"})
+		return
+	}
 	blockID := c.Param("block_id")
+
+	if !ownsStudyBlock(blockID, userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Este card não pertence ao seu ciclo."})
+		return
+	}
+
 	database.DB.Where("id = ?", blockID).Delete(&models.StudyBlock{})
 	c.JSON(http.StatusOK, gin.H{"message": "Card removido"})
 }

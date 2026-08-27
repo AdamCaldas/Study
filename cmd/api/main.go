@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"studfy-backend/internal/admin"
@@ -174,29 +177,29 @@ func main() {
 			spaceRoutes.GET("/quizzes", study.ListSpaceQuizzes)
 			spaceRoutes.GET("/dashboard", study.GetSpaceDashboard)
 
-			spaceRoutes.PUT("", space.UpdateSpace)
-			spaceRoutes.DELETE("", space.DeleteSpace)
+			spaceRoutes.PUT("", auth.RequireSpaceEditInfo(), space.UpdateSpace)
+			spaceRoutes.DELETE("", auth.RequireSpaceOwner(), space.DeleteSpace)
 			spaceRoutes.POST("/share", space.ShareSpace)
 			spaceRoutes.GET("/history", space.GetSpaceHistory)
-			spaceRoutes.GET("/requests", space.ListSpaceRequests)
-			spaceRoutes.POST("/requests/:request_id/respond", space.RespondSpaceRequest)
-			spaceRoutes.PUT("/collaborators/:user_id", space.UpdateCollaborator)
-			spaceRoutes.DELETE("/collaborators/:user_id", space.RemoveCollaborator)
+			spaceRoutes.GET("/requests", auth.RequireSpaceManageMembers(), space.ListSpaceRequests)
+			spaceRoutes.POST("/requests/:request_id/respond", auth.RequireSpaceManageMembers(), space.RespondSpaceRequest)
+			spaceRoutes.PUT("/collaborators/:user_id", auth.RequireSpaceManageMembers(), space.UpdateCollaborator)
+			spaceRoutes.DELETE("/collaborators/:user_id", auth.RequireSpaceManageMembers(), space.RemoveCollaborator)
 			spaceRoutes.GET("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 			spaceRoutes.PUT("/dossier/:student_id", space.GetOrUpdateStudentDossier)
 
-			spaceRoutes.POST("/questions", study.CreateSpaceQuestion)
+			spaceRoutes.POST("/questions", auth.RequireSpaceCreateContent(), study.CreateSpaceQuestion)
 			spaceRoutes.GET("/questions", study.ListSpaceQuestions)
-			spaceRoutes.PUT("/questions/:question_id", study.UpdateSpaceQuestion)
-			spaceRoutes.DELETE("/questions/:question_id", study.DeleteSpaceQuestion)
-			spaceRoutes.POST("/questions/clone", study.CloneStudfyQuestion)
+			spaceRoutes.PUT("/questions/:question_id", auth.RequireSpaceEditContent(), study.UpdateSpaceQuestion)
+			spaceRoutes.DELETE("/questions/:question_id", auth.RequireSpaceDeleteContent(), study.DeleteSpaceQuestion)
+			spaceRoutes.POST("/questions/clone", auth.RequireSpaceCreateContent(), study.CloneStudfyQuestion)
 
-			spaceRoutes.POST("/notebooks", notebook.CreateNotebook)
+			spaceRoutes.POST("/notebooks", auth.RequireSpaceCreateContent(), notebook.CreateNotebook)
 			spaceRoutes.PUT("/notebooks/:notebook_id", notebook.UpdateNotebook)
 			spaceRoutes.DELETE("/notebooks/:notebook_id", notebook.DeleteNotebook)
-			spaceRoutes.POST("/notes", space.CreateQuickNote)
-			spaceRoutes.PUT("/notes/:note_id", space.UpdateQuickNote)
-			spaceRoutes.DELETE("/notes/:note_id", space.DeleteQuickNote)
+			spaceRoutes.POST("/notes", auth.RequireSpaceCreateContent(), space.CreateQuickNote)
+			spaceRoutes.PUT("/notes/:note_id", auth.RequireSpaceEditContent(), space.UpdateQuickNote)
+			spaceRoutes.DELETE("/notes/:note_id", auth.RequireSpaceDeleteContent(), space.DeleteQuickNote)
 
 			spaceRoutes.POST("/plans/auto-generate", study.GenerateAutoPlan)
 			spaceRoutes.POST("/plans/auto-fit", study.AutoFitPlanBlocks)
@@ -216,16 +219,16 @@ func main() {
 			spaceRoutes.PUT("/cycles/blocks/:block_id", study.UpdateCycleBlock)
 			spaceRoutes.DELETE("/cycles/blocks/:block_id", study.DeleteCycleBlock)
 
-			spaceRoutes.POST("/reviews", study.CreateReview)
-			spaceRoutes.POST("/quizzes", study.CreateQuiz)
+			spaceRoutes.POST("/reviews", auth.RequireSpaceCreateContent(), study.CreateReview)
+			spaceRoutes.POST("/quizzes", auth.RequireSpaceManageQuizzes(), study.CreateQuiz)
 			spaceRoutes.POST("/quizzes/:quiz_id/submit", study.SubmitQuiz)
 			spaceRoutes.POST("/quizzes/:quiz_id/cheat-alert", study.ReportCheatAttempt)
-			spaceRoutes.PUT("/quizzes/results/:result_id/grade", study.GradeQuizManual)
+			spaceRoutes.PUT("/quizzes/results/:result_id/grade", auth.RequireSpaceManageQuizzes(), study.GradeQuizManual)
 			spaceRoutes.POST("/certificate", study.ClaimCertificate)
 
-			spaceRoutes.GET("/doubts", space.ListSpaceDoubts)
+			spaceRoutes.GET("/doubts", auth.RequireSpaceStaff(), space.ListSpaceDoubts)
 			spaceRoutes.POST("/pages/:page_id/doubts", space.CreatePageDoubt)
-			spaceRoutes.PUT("/doubts/:doubt_id/answer", space.AnswerPageDoubt)
+			spaceRoutes.PUT("/doubts/:doubt_id/answer", auth.RequireSpaceStaff(), space.AnswerPageDoubt)
 			spaceRoutes.POST("/megafone", space.SendMegaphoneMessage)
 			spaceRoutes.POST("/attendance", space.GenerateAttendanceQR)
 
@@ -237,30 +240,30 @@ func main() {
 			spaceRoutes.GET("/ranking", gamification.GetSpaceRanking)
 			spaceRoutes.PATCH("/ranking/toggle", gamification.ToggleSpaceRanking)
 
-			spaceRoutes.GET("/analytics/thermometer", space.GetClassThermometer)
-			spaceRoutes.GET("/analytics/export-diary", space.ExportClassDiaryCSV)
-			spaceRoutes.POST("/automation/rules", space.CreateAutomationRule)
-			spaceRoutes.GET("/reports/at-risk", space.GetAtRiskStudents)
-			spaceRoutes.GET("/reports/mortality", space.GetMaterialMortalityRate)
-			spaceRoutes.GET("/reports/engagement", space.GetMaterialEngagement)
+			spaceRoutes.GET("/analytics/thermometer", auth.RequireSpaceStaff(), space.GetClassThermometer)
+			spaceRoutes.GET("/analytics/export-diary", auth.RequireSpaceStaff(), space.ExportClassDiaryCSV)
+			spaceRoutes.POST("/automation/rules", auth.RequireSpaceOwner(), space.CreateAutomationRule)
+			spaceRoutes.GET("/reports/at-risk", auth.RequireSpaceStaff(), space.GetAtRiskStudents)
+			spaceRoutes.GET("/reports/mortality", auth.RequireSpaceStaff(), space.GetMaterialMortalityRate)
+			spaceRoutes.GET("/reports/engagement", auth.RequireSpaceStaff(), space.GetMaterialEngagement)
 
-			spaceRoutes.POST("/flashcards", study.CreateFlashcard)
+			spaceRoutes.POST("/flashcards", auth.RequireSpaceCreateContent(), study.CreateFlashcard)
 			spaceRoutes.GET("/flashcards", study.ListFlashcards)
-			spaceRoutes.PUT("/flashcards/:card_id", study.UpdateFlashcard)
-			spaceRoutes.DELETE("/flashcards/:card_id", study.DeleteFlashcard)
+			spaceRoutes.PUT("/flashcards/:card_id", auth.RequireSpaceEditContent(), study.UpdateFlashcard)
+			spaceRoutes.DELETE("/flashcards/:card_id", auth.RequireSpaceDeleteContent(), study.DeleteFlashcard)
 
-			spaceRoutes.POST("/flashcard-categories", study.CreateCategory)
+			spaceRoutes.POST("/flashcard-categories", auth.RequireSpaceCreateContent(), study.CreateCategory)
 			spaceRoutes.GET("/flashcard-categories", study.ListCategories)
-			spaceRoutes.DELETE("/flashcard-categories/:category_id", study.DeleteCategory)
+			spaceRoutes.DELETE("/flashcard-categories/:category_id", auth.RequireSpaceDeleteContent(), study.DeleteCategory)
 
-			spaceRoutes.POST("/flashcard-tags", study.CreateTag)
+			spaceRoutes.POST("/flashcard-tags", auth.RequireSpaceCreateContent(), study.CreateTag)
 			spaceRoutes.GET("/flashcard-tags", study.ListTags)
-			spaceRoutes.DELETE("/flashcard-tags/:tag_id", study.DeleteTag)
+			spaceRoutes.DELETE("/flashcard-tags/:tag_id", auth.RequireSpaceDeleteContent(), study.DeleteTag)
 
-			spaceRoutes.POST("/question-groups", study.CreateQuestionGroup)
+			spaceRoutes.POST("/question-groups", auth.RequireSpaceCreateContent(), study.CreateQuestionGroup)
 			spaceRoutes.GET("/question-groups", study.ListQuestionGroups)
-			spaceRoutes.PUT("/question-groups/:group_id", study.UpdateQuestionGroup)
-			spaceRoutes.DELETE("/question-groups/:group_id", study.DeleteQuestionGroup)
+			spaceRoutes.PUT("/question-groups/:group_id", auth.RequireSpaceEditContent(), study.UpdateQuestionGroup)
+			spaceRoutes.DELETE("/question-groups/:group_id", auth.RequireSpaceDeleteContent(), study.DeleteQuestionGroup)
 		}
 	}
 
@@ -312,12 +315,29 @@ func main() {
 		Addr:         ":" + port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 30 * time.Second, // relatórios/CSV podem demorar um pouco mais
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("Iniciando servidor na porta %s...", port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Erro crítico no servidor: %v", err)
+	// Sobe o servidor em background para podermos escutar o sinal de desligamento.
+	go func() {
+		log.Printf("Iniciando servidor na porta %s...", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Erro crítico no servidor: %v", err)
+		}
+	}()
+
+	// 🛑 GRACEFUL SHUTDOWN: no deploy/CTRL+C, espera as requisições em andamento
+	// terminarem (até 15s) antes de fechar, em vez de derrubar todo mundo na hora.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Desligando o servidor com elegância...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Servidor forçado a desligar: %v", err)
 	}
+	log.Println("Servidor desligado com sucesso.")
 }

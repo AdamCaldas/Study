@@ -2,8 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"os"
 	"time"
@@ -17,7 +18,19 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/api/idtoken"
+	"gorm.io/gorm"
 )
+
+// secureCode gera um código numérico de 6 dígitos usando o gerador
+// criptográfico (crypto/rand), que é imprevisível — ao contrário do math/rand.
+func secureCode() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		// Fallback extremamente improvável de acontecer.
+		return "000000"
+	}
+	return fmt.Sprintf("%06d", n.Int64())
+}
 
 // ==========================================================
 // 1. REGISTRAR USUÁRIO (Agora enviando e-mail de verdade!)
@@ -62,7 +75,7 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+	code := secureCode()
 
 	verificationCode := models.VerificationCode{
 		Email:     newUser.Email,
@@ -93,8 +106,10 @@ func VerifyEmailCode(c *gin.Context) {
 		return
 	}
 
+	// Busca o código mais recente desse e-mail (por e-mail, não por código —
+	// assim conseguimos contar as tentativas erradas e travar a força-bruta).
 	var verification models.VerificationCode
-	if err := database.DB.Where("email = ? AND code = ?", input.Email, input.Code).First(&verification).Error; err != nil {
+	if err := database.DB.Where("email = ?", input.Email).Order("created_at DESC").First(&verification).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Código inválido ou incorreto."})
 		return
 	}
@@ -102,6 +117,19 @@ func VerifyEmailCode(c *gin.Context) {
 	if time.Now().After(verification.ExpiresAt) {
 		database.DB.Delete(&verification)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Este código expirou. Solicite um novo."})
+		return
+	}
+
+	// 🚦 Trava anti força-bruta: 5 tentativas erradas invalidam o código.
+	if verification.Attempts >= 5 {
+		database.DB.Delete(&verification)
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Muitas tentativas. Solicite um novo código."})
+		return
+	}
+
+	if verification.Code != input.Code {
+		database.DB.Model(&verification).Update("attempts", gorm.Expr("attempts + 1"))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Código inválido ou incorreto."})
 		return
 	}
 
@@ -145,14 +173,18 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Servidor sem JWT_SECRET configurado."})
+		return
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.ID,
 		"exp": time.Now().Add(time.Hour * 24).Unix(),
 	})
 
-	secret := os.Getenv("JWT_SECRET")
 	tokenString, err := token.SignedString([]byte(secret))
-
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar o token de acesso."})
 		return
@@ -255,7 +287,16 @@ func GoogleAuth(c *gin.Context) {
 		return
 	}
 
-	payload, err := idtoken.Validate(context.Background(), input.Token, "")
+	// 🛡️ Valida a AUDIÊNCIA: o token do Google precisa ter sido emitido para o
+	// NOSSO app. Sem isso, qualquer token válido do Google (de outro app)
+	// conseguia logar aqui.
+	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
+	if googleClientID == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Login com Google não está configurado no servidor."})
+		return
+	}
+
+	payload, err := idtoken.Validate(context.Background(), input.Token, googleClientID)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token do Google inválido ou expirado."})
 		return
@@ -287,13 +328,22 @@ func GoogleAuth(c *gin.Context) {
 		}
 	}
 
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Servidor sem JWT_SECRET configurado."})
+		return
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.ID,
 		"exp": time.Now().Add(time.Hour * 24).Unix(),
 	})
 
-	secret := os.Getenv("JWT_SECRET")
-	tokenString, _ := token.SignedString([]byte(secret))
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar o token de acesso."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login com Google realizado com sucesso!",

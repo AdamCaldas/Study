@@ -192,7 +192,10 @@ func CheckSpaceLimit() gin.HandlerFunc {
 	}
 }
 
-// CheckSpaceAccess verifica se o usuário é dono do Space ou se é um convidado (amigo)
+// CheckSpaceAccess verifica se o usuário é dono do Space ou se é um convidado (amigo).
+// Além de liberar o acesso, ele guarda no contexto QUEM é (dono ou colaborador) e
+// QUAIS permissões granulares esse colaborador tem, para os guardas de cargo
+// (RequireSpaceOwner, RequireSpacePerm...) decidirem o que ele pode fazer.
 func CheckSpaceAccess() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, err := utils.GetUserID(c)
@@ -211,25 +214,138 @@ func CheckSpaceAccess() gin.HandlerFunc {
 		}
 
 		var space models.Space
-		err = database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, userID).First(&space).Error
+		if err := database.DB.Select("id", "owner_id").Where("id = ?", parsedSpaceID).First(&space).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado."})
+			c.Abort()
+			return
+		}
 
-		if err == nil {
+		// Dono da turma: passa com poder total.
+		if space.OwnerID == userID {
+			c.Set("spaceIsOwner", true)
+			c.Set("spaceRole", "OWNER")
 			c.Next()
 			return
 		}
 
+		// Colaborador/aluno: precisa ter uma linha de permissão nesta turma.
 		var permission models.SpacePermission
-		err = database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).First(&permission).Error
-
-		if err != nil {
+		if err := database.DB.Where("space_id = ? AND user_id = ?", parsedSpaceID, userID).First(&permission).Error; err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Acesso negado. Você não é o dono e não foi convidado para este Space."})
 			c.Abort()
 			return
 		}
 
+		c.Set("spaceIsOwner", false)
+		c.Set("spacePermission", permission)
 		c.Set("spaceRole", permission.AccessLevel)
 		c.Next()
 	}
+}
+
+// ==========================================================
+// 🛡️ GUARDAS DE CARGO DENTRO DO SPACE
+// Rodam SEMPRE depois do CheckSpaceAccess (que popula o contexto).
+// O dono passa em todos. O colaborador só passa se tiver a permissão granular.
+// ==========================================================
+
+// IsSpaceOwner diz se quem está na requisição é o dono da turma.
+func IsSpaceOwner(c *gin.Context) bool {
+	v, _ := c.Get("spaceIsOwner")
+	owner, _ := v.(bool)
+	return owner
+}
+
+// SpacePermissionFromCtx devolve a permissão do colaborador guardada pelo CheckSpaceAccess.
+func SpacePermissionFromCtx(c *gin.Context) (models.SpacePermission, bool) {
+	v, ok := c.Get("spacePermission")
+	if !ok {
+		return models.SpacePermission{}, false
+	}
+	perm, ok := v.(models.SpacePermission)
+	return perm, ok
+}
+
+// RequireSpaceOwner bloqueia qualquer um que não seja o dono da turma.
+func RequireSpaceOwner() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !IsSpaceOwner(c) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Apenas o professor (dono) da turma pode fazer isso."})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireSpacePerm libera o dono sempre, e o colaborador só se `has` for verdadeiro
+// para a permissão dele.
+func RequireSpacePerm(has func(models.SpacePermission) bool, msg string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if IsSpaceOwner(c) {
+			c.Next()
+			return
+		}
+		perm, ok := SpacePermissionFromCtx(c)
+		if !ok || !has(perm) {
+			c.JSON(http.StatusForbidden, gin.H{"error": msg})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// isEditorOrMonitor: colaborador "de equipe" pelo cargo (mesmo que os booleans
+// granulares não tenham sido marcados — o modelo antigo às vezes só setava o nível).
+func isEditorOrMonitor(p models.SpacePermission) bool {
+	return p.AccessLevel == "EDITOR" || p.AccessLevel == "MONITOR"
+}
+
+// Atalhos para os cargos usados nas rotas.
+func RequireSpaceManageMembers() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanManageMembers },
+		"Apenas o professor ou quem gerencia membros pode fazer isso.")
+}
+
+func RequireSpaceCreateContent() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanCreateContent || isEditorOrMonitor(p) },
+		"Você não tem permissão para criar conteúdo nesta turma.")
+}
+
+func RequireSpaceEditContent() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool {
+		return p.CanEditContent || p.CanCreateContent || isEditorOrMonitor(p)
+	},
+		"Você não tem permissão para editar conteúdo nesta turma.")
+}
+
+func RequireSpaceDeleteContent() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanDeleteContent || isEditorOrMonitor(p) },
+		"Você não tem permissão para apagar conteúdo nesta turma.")
+}
+
+func RequireSpaceManagePlans() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanManagePlans || isEditorOrMonitor(p) },
+		"Você não tem permissão para gerenciar planos/ciclos nesta turma.")
+}
+
+func RequireSpaceManageQuizzes() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanManageQuizzes || isEditorOrMonitor(p) },
+		"Você não tem permissão para gerenciar simulados nesta turma.")
+}
+
+func RequireSpaceEditInfo() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool { return p.CanEditSpaceInfo || p.CanChangeSettings },
+		"Você não tem permissão para alterar as configurações desta turma.")
+}
+
+// RequireSpaceStaff libera o dono, monitores/editores e quem gerencia conteúdo —
+// usado nas telas de professor (dúvidas, termômetro, relatórios da turma).
+func RequireSpaceStaff() gin.HandlerFunc {
+	return RequireSpacePerm(func(p models.SpacePermission) bool {
+		return p.AccessLevel == "EDITOR" || p.AccessLevel == "MONITOR" || p.CanManageMembers || p.CanEditContent
+	}, "Apenas o professor e os monitores podem acessar isso.")
 }
 
 // AdminOnly - Middleware que bloqueia qualquer um que não seja DEV ou ADMIN.

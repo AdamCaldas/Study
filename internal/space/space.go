@@ -358,6 +358,17 @@ func CreatePageDoubt(c *gin.Context) {
 		studentID, _ = uuid.Parse(v)
 	}
 
+	parsedSpaceID, err := uuid.Parse(spaceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+	parsedPageID, err := uuid.Parse(pageID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da página inválido."})
+		return
+	}
+
 	var input struct {
 		Content string `json:"content" binding:"required"`
 	}
@@ -367,8 +378,8 @@ func CreatePageDoubt(c *gin.Context) {
 	}
 
 	newDoubt := models.PageDoubt{
-		SpaceID:   uuid.MustParse(spaceID),
-		PageID:    uuid.MustParse(pageID),
+		SpaceID:   parsedSpaceID,
+		PageID:    parsedPageID,
 		StudentID: studentID,
 		Content:   input.Content,
 	}

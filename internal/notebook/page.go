@@ -176,10 +176,32 @@ func UpdatePage(c *gin.Context) {
 // 3️⃣ REORDER E DELETE DE PÁGINAS
 // ==========================================================
 func DeletePage(c *gin.Context) {
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	pageIDStr := c.Param("page_id")
 	parsedPageID, err := uuid.Parse(pageIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Página inválido"})
+		return
+	}
+
+	// 🛡️ IDOR: carrega a página e confirma que o usuário pode editar o caderno dela.
+	var page models.Page
+	if err := database.DB.Where("id = ?", parsedPageID).First(&page).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Página não encontrada"})
+		return
+	}
+	var notebook models.Notebook
+	if err := database.DB.Select("id", "space_id").Where("id = ?", page.NotebookID).First(&notebook).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno da página não encontrado"})
+		return
+	}
+	if !canEditNotebook(notebook.SpaceID, notebook.ID, parsedUserID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para apagar esta página."})
 		return
 	}
 
@@ -198,11 +220,20 @@ type ReorderPagesRequest struct {
 }
 
 func ReorderPages(c *gin.Context) {
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	var req ReorderPagesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato JSON inválido."})
 		return
 	}
+
+	// Cache de "posso editar este caderno?" para não repetir query por página.
+	editableNotebook := make(map[uuid.UUID]bool)
 
 	tx := database.DB.Begin()
 	for _, p := range req.Pages {
@@ -210,6 +241,30 @@ func ReorderPages(c *gin.Context) {
 		if err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusBadRequest, gin.H{"error": "ID de página inválido na lista."})
+			return
+		}
+
+		// 🛡️ IDOR: confirma a permissão no caderno de cada página.
+		var page models.Page
+		if err := tx.Select("id", "notebook_id").Where("id = ?", parsedID).First(&page).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusNotFound, gin.H{"error": "Página não encontrada na lista."})
+			return
+		}
+		allowed, checked := editableNotebook[page.NotebookID]
+		if !checked {
+			var notebook models.Notebook
+			if err := tx.Select("id", "space_id").Where("id = ?", page.NotebookID).First(&notebook).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusNotFound, gin.H{"error": "Caderno da página não encontrado."})
+				return
+			}
+			allowed = canEditNotebook(notebook.SpaceID, notebook.ID, parsedUserID)
+			editableNotebook[page.NotebookID] = allowed
+		}
+		if !allowed {
+			tx.Rollback()
+			c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para reordenar estas páginas."})
 			return
 		}
 

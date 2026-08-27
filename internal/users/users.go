@@ -51,8 +51,9 @@ func GetMyProfile(c *gin.Context) {
 		{"id": 3, "name": "Escritor Ávido", "icon_url": "url-do-trofeu", "is_unlocked": false},
 	}
 
-	var qtdNotebooks, qtdNotes, qtdStrategies int64
-	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", userID).Count(&qtdNotebooks)
+	// Reaproveita a contagem de cadernos já feita acima (era a mesma query repetida).
+	qtdNotebooks := totalNotebooks
+	var qtdNotes, qtdStrategies int64
 	database.DB.Model(&models.StudyStrategy{}).Where("created_by_id = ?", userID).Count(&qtdStrategies)
 
 	database.DB.Table("quick_notes").
