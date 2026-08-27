@@ -60,7 +60,8 @@ func CreateFlashcard(c *gin.Context) {
 	}
 
 	if input.QuestionID != "" {
-		if input.QuestionSource == "STUDFY" {
+		switch input.QuestionSource {
+		case "STUDFY":
 			var q models.StudfyQuestion
 			if err := database.DB.Where("id = ?", input.QuestionID).First(&q).Error; err == nil {
 				input.Title = q.Title
@@ -68,7 +69,7 @@ func CreateFlashcard(c *gin.Context) {
 				input.Front = q.QuestionText
 				input.Back = "Gabarito: " + q.CorrectAnswer
 			}
-		} else if input.QuestionSource == "SPACE" {
+		case "SPACE":
 			var q models.SpaceQuestion
 			if err := database.DB.Where("id = ?", input.QuestionID).First(&q).Error; err == nil {
 				input.Title = q.Title

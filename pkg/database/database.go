@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,19 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+// Ping confirma que o banco responde de verdade — usado pelo /health para o
+// balanceador não mandar tráfego para uma instância sem banco.
+func Ping(ctx context.Context) error {
+	if DB == nil {
+		return fmt.Errorf("banco não inicializado")
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
+}
 
 // withStatementTimeout injeta o statement_timeout do Postgres na string de
 // conexão, respeitando o formato usado (URL ou "chave=valor").

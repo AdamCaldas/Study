@@ -22,6 +22,9 @@ import (
 // Tempo mínimo entre duas sincronizações do mesmo usuário com o Keycloak.
 const keycloakUserCacheTTL = 5 * time.Minute
 
+// Duração do período de teste de quem entra pela primeira vez.
+const trialDays = 14
+
 // KeycloakClaims são os campos do access token do Keycloak que nos interessam.
 // O `sub` (id do usuário no Keycloak) vem de RegisteredClaims.Subject e é o
 // ÚNICO lugar de onde a identidade sai: não consultamos a tabela `users`.
@@ -75,7 +78,11 @@ func readKeycloakConfig() keycloakConfig {
 		log.Println("⚠️  Keycloak: ALLOW_LEGACY_JWT ativo — tokens HS256 antigos (JWT_SECRET) continuam aceitos.")
 	}
 	if cfg.onlyToken {
-		log.Println("Keycloak: KEYCLOAK_ONLY ativo — a identidade sai inteira do token, nada é lido nem criado na tabela `users`.")
+		log.Println("🚨 ATENÇÃO: KEYCLOAK_ONLY está ativo.")
+		log.Println("🚨 Nada será espelhado na tabela `users` — e o app PRECISA dessa linha:")
+		log.Println("🚨 XP, ofensiva, plano, bio e tema não existem no token, só no banco.")
+		log.Println("🚨 Com esta flag ligada, /v1/app/bootstrap responde 404 e o app não abre.")
+		log.Println("🚨 Use KEYCLOAK_ONLY=false (quem autentica continua sendo só o Keycloak).")
 	}
 
 	return cfg
@@ -189,6 +196,9 @@ func createMirroredUser(claims *KeycloakClaims, userID uuid.UUID, email, fullNam
 		IsEmailVerified:  claims.EmailVerified,
 		AccountType:      accountTypeFromRoles(claims.RealmAccess.Roles),
 		SubscriptionType: utils.PlanFreeTrial,
+		// TrialEndsAt não era preenchido: o usuário nascia com o teste vencido
+		// no ano 0 (0000-12-31), o que quebra qualquer regra de expiração.
+		TrialEndsAt: time.Now().AddDate(0, 0, trialDays),
 	}
 
 	if err := database.DB.Create(&newUser).Error; err != nil {

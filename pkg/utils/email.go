@@ -79,7 +79,7 @@ func SendEmailViaBrevo(toEmail, subject, htmlBody string) {
 		log.Println("Erro ao conectar na API do Brevo:", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		log.Println("✅ E-mail enviado com sucesso via Brevo para:", toEmail)

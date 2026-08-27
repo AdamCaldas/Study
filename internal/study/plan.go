@@ -82,12 +82,20 @@ type SuperEditPlanInput struct {
 // 🧮 FUNÇÕES AUXILIARES DE TEMPO (HH:MM -> Minutos)
 // ==========================================================
 
+// timeToMinutes converte "HH:MM" (ou "HH:MM:SS") em minutos desde a meia-noite.
+// Devolve 0 para entrada vazia ou malformada — antes o erro do Sscanf era
+// ignorado e um horário inválido virava 0 silenciosamente.
 func timeToMinutes(t string) int {
 	if t == "" {
 		return 0
 	}
 	var h, m int
-	fmt.Sscanf(t, "%d:%d", &h, &m)
+	if _, err := fmt.Sscanf(t, "%d:%d", &h, &m); err != nil {
+		return 0
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0
+	}
 	return h*60 + m
 }
 

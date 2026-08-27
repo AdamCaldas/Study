@@ -74,13 +74,26 @@ services:
       # O `iss` que vem escrito dentro do token, do ponto de vista de quem
       # pediu o token (o navegador/Bruno, no host). Por isso é "localhost".
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/studfy}
-      # A identidade sai inteira do token: nada é lido nem criado em `users`.
-      KEYCLOAK_ONLY: ${KEYCLOAK_ONLY:-true}
+      # ⚠️ KEYCLOAK_ONLY precisa ficar FALSE.
+      # Quem autentica continua sendo só o Keycloak — isto não muda.
+      # O que esta flag controla é o espelho do usuário na tabela `users`, e o
+      # app PRECISA dessa linha: XP, ofensiva, plano, bio e tema não existem no
+      # token, só no banco. Com KEYCLOAK_ONLY=true nada é espelhado e o
+      # /v1/app/bootstrap responde 404 já na primeira tela — o app não abre.
+      KEYCLOAK_ONLY: ${KEYCLOAK_ONLY:-false}
       FRONTEND_URL: ${FRONTEND_URL}
       BREVO_API_KEY: ${BREVO_API_KEY}
       SENDER_EMAIL: ${SENDER_EMAIL}
     ports:
       - "${API_PORT:-8080}:8080"
+    # Usa /health (e não /ping): ele confere o banco de verdade, então o
+    # orquestrador não considera saudável uma instância sem banco.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   pgdata:

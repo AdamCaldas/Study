@@ -931,11 +931,11 @@ func ExportClassDiaryCSV(c *gin.Context) {
 	writer := csv.NewWriter(b)
 
 	// 4. Escreve o Cabeçalho da Planilha (Linha 1)
-	writer.Write([]string{"Nome do Aluno", "Email", "XP Acumulado", "Total de Presencas", "Media Geral (Provas)"})
+	_ = writer.Write([]string{"Nome do Aluno", "Email", "XP Acumulado", "Total de Presencas", "Media Geral (Provas)"})
 
 	// 5. Preenche os dados (já vieram prontos do banco)
 	for _, r := range rows {
-		writer.Write([]string{
+		_ = writer.Write([]string{
 			r.FullName,
 			r.Email,
 			fmt.Sprintf("%d", r.XP),
@@ -944,8 +944,14 @@ func ExportClassDiaryCSV(c *gin.Context) {
 		})
 	}
 
-	// Garante que tudo foi escrito no Buffer
+	// Garante que tudo foi escrito no Buffer.
+	// O csv.Writer acumula o erro internamente: só aqui dá para saber se a
+	// planilha saiu completa, em vez de mandar um arquivo truncado para o professor.
 	writer.Flush()
+	if err := writer.Error(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao montar a planilha do diário."})
+		return
+	}
 
 	// 6. MÁGICA: Configura os Headers para forçar o Navegador a fazer o DOWNLOAD do arquivo
 	c.Header("Content-Description", "File Transfer")

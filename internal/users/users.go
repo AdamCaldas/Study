@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"studfy-backend/internal/models"
+	"studfy-backend/pkg/cache"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import global
 
@@ -245,6 +246,12 @@ func UpdatePassword(c *gin.Context) {
 // ==========================================================
 // 🚨 4️⃣ Deleta conta
 // ==========================================================
+// DeleteMyAccount apaga a conta E os dados pessoais ligados a ela.
+//
+// Antes isto era só um soft-delete na linha do usuário: as turmas que ele
+// criou, os cadernos, as notas, as respostas de prova e o histórico ficavam
+// todos no banco, órfãos e ainda ligados ao id dele. Além de lixo acumulado,
+// o direito de exclusão (LGPD) não era cumprido de fato.
 func DeleteMyAccount(c *gin.Context) {
 	userID, err := utils.GetUserID(c)
 	if err != nil {
@@ -252,12 +259,66 @@ func DeleteMyAccount(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Where("id = ?", userID).Delete(&models.User{}).Error; err != nil {
+	tx := database.DB.Begin()
+	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir conta."})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Conta excluída."})
+	// 1. As turmas que ele criou saem junto. O OnDelete:CASCADE do banco leva
+	//    cadernos, guias, páginas e o que estiver pendurado nelas.
+	if err := tx.Unscoped().Where("owner_id = ?", userID).Delete(&models.Space{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir as turmas da conta."})
+		return
+	}
+
+	// 2. Vínculos e rastros pessoais dele em turmas de outras pessoas.
+	pessoais := []interface{}{
+		&models.SpacePermission{}, &models.SpaceJoinRequest{},
+		&models.PomodoroSession{}, &models.MoodCheckIn{}, &models.ActivityLog{},
+		&models.StudySession{}, &models.QuizResult{}, &models.Certificate{},
+		&models.AvailabilityProfile{}, &models.MissionCompletion{},
+		&models.UserBadge{}, &models.NotificationRead{}, &models.Review{},
+		&models.PageNote{}, &models.PaymentHistory{},
+	}
+	for _, modelo := range pessoais {
+		if err := tx.Unscoped().Where("user_id = ?", userID).Delete(modelo).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir os dados da conta."})
+			return
+		}
+	}
+
+	// 3. Tabelas que chamam o usuário por outro nome de coluna.
+	tx.Unscoped().Where("student_id = ?", userID).Delete(&models.PageDoubt{})
+	tx.Unscoped().Where("student_id = ?", userID).Delete(&models.AttendanceRecord{})
+	tx.Unscoped().Where("student_id = ?", userID).Delete(&models.StudentDossier{})
+	tx.Unscoped().Where("follower_id = ? OR following_id = ?", userID, userID).Delete(&models.Follower{})
+	tx.Unscoped().Where("created_by_id = ?", userID).Delete(&models.StudyStrategy{})
+
+	// 4. Por fim, a conta. Soft-delete: mantém a integridade das referências que
+	//    sobraram (autoria de conteúdo em turma de terceiros) sem expor a pessoa.
+	if err := tx.Where("id = ?", userID).Delete(&models.User{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao excluir conta."})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao concluir a exclusão."})
+		return
+	}
+
+	// Limpa o que estava em memória para a conta não "reaparecer" pelo cache.
+	cache.AppCache.Delete("dashboard_" + userID.String())
+	cache.AppCache.Delete("kc_sync:" + userID.String())
+	cache.AppCache.Delete("seen:" + userID.String())
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Conta e dados pessoais excluídos.",
+		"detail":  "A exclusão do login em si é feita no Keycloak.",
+	})
 }
 
 // ==========================================================

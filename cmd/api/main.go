@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,26 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
+
+// isEnvTrue lê uma variável de ambiente booleana de forma tolerante.
+func isEnvTrue(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	}
+	return false
+}
+
+func legacyAuthEnabled() bool { return isEnvTrue("ENABLE_LEGACY_AUTH") }
+
+// contaPeloKeycloak responde às rotas do login antigo dizendo, sem rodeios,
+// onde o cadastro e o login realmente acontecem.
+func contaPeloKeycloak(c *gin.Context) {
+	c.JSON(http.StatusGone, gin.H{
+		"error":  "Cadastro e login são feitos pelo Keycloak, não por esta API.",
+		"detail": "Use o fluxo de login do Keycloak e envie o access token em Authorization: Bearer <token>.",
+	})
+}
 
 func main() {
 	// 1. Carrega Variáveis de Ambiente
@@ -75,28 +96,78 @@ func main() {
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	router := gin.Default()
+	// gin.New() (e não gin.Default()) porque trocamos o logger e o recovery
+	// padrão pelos nossos, que gravam JSON estruturado com request_id.
+	router := gin.New()
 
 	// ==========================================================
 	// 🗜️ MIDDLEWARES GLOBAIS DE SEGURANÇA E PERFORMANCE
 	// ==========================================================
-	router.Use(gzip.Gzip(gzip.DefaultCompression))
+	router.Use(middleware.RequestLogger())
+	router.Use(middleware.Recovery())
+	// O health check não precisa de compressão (é uma linha de texto).
+	router.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/ping"})))
 	router.Use(middleware.SecureCORS())
 	router.Use(middleware.RateLimiter())
 
 	// ==========================================================
 	// 🔓 ROTAS PÚBLICAS
 	// ==========================================================
+	// Sinal de vida simples (o processo está de pé).
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong! Servidor StudFy Operacional 🚀"})
 	})
 
-	router.POST("/v1/register", auth.Register)
-	router.POST("/v1/verify-email", auth.VerifyEmailCode)
-	router.POST("/v1/login", auth.Login)
-	router.POST("/v1/forgot-password", auth.ForgotPassword)
-	router.POST("/v1/reset-password", auth.ResetPassword)
-	router.POST("/v1/auth/google", auth.GoogleAuth)
+	// ❤️ Health check DE VERDADE, para o balanceador e o deploy.
+	// O /ping respondia "operacional" mesmo com o banco fora — e o balanceador
+	// mandava aluno para uma instância que não conseguia responder nada.
+	router.GET("/health", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := database.Ping(ctx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":   "degradado",
+				"database": "inacessível",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "database": "ok"})
+	})
+
+	// ----------------------------------------------------------
+	// 🔑 CADASTRO E LOGIN: quem cuida disso é o KEYCLOAK.
+	// ----------------------------------------------------------
+	// Estas rotas são do sistema de login antigo (senha no nosso banco, token
+	// HS256). Elas ficavam ABERTAS e "funcionando": o usuário se cadastrava,
+	// fazia login, recebia um token — e TODAS as rotas protegidas devolviam 401,
+	// porque o porteiro só aceita a assinatura do Keycloak. Uma porta de entrada
+	// que não levava a lugar nenhum.
+	//
+	// Agora ficam desligadas por padrão e respondem 410 com a explicação, em vez
+	// de sumirem sem aviso. Para reativar durante uma migração, ligue as DUAS:
+	// ENABLE_LEGACY_AUTH=true e ALLOW_LEGACY_JWT=true (uma sem a outra recria
+	// exatamente o beco sem saída descrito acima).
+	if legacyAuthEnabled() {
+		log.Println("⚠️  ENABLE_LEGACY_AUTH ativo: o cadastro/login antigo está aberto.")
+		if !isEnvTrue("ALLOW_LEGACY_JWT") {
+			log.Println("🚨 ...mas ALLOW_LEGACY_JWT está DESLIGADO: o token gerado pelo login antigo")
+			log.Println("🚨    será recusado em todas as rotas protegidas. Ligue as duas ou nenhuma.")
+		}
+		router.POST("/v1/register", auth.Register)
+		router.POST("/v1/verify-email", auth.VerifyEmailCode)
+		router.POST("/v1/login", auth.Login)
+		router.POST("/v1/forgot-password", auth.ForgotPassword)
+		router.POST("/v1/reset-password", auth.ResetPassword)
+		router.POST("/v1/auth/google", auth.GoogleAuth)
+	} else {
+		for _, rota := range []string{
+			"/v1/register", "/v1/verify-email", "/v1/login",
+			"/v1/forgot-password", "/v1/reset-password", "/v1/auth/google",
+		} {
+			router.POST(rota, contaPeloKeycloak)
+		}
+	}
 
 	// ==========================================================
 	// 🛡️ ROTAS PROTEGIDAS DO USUÁRIO
@@ -110,7 +181,13 @@ func main() {
 		protected.GET("/me", users.GetMyProfile)
 		protected.PUT("/me", users.UpdateMyProfile)
 		protected.PATCH("/me/settings", users.UpdateMySettings)
-		protected.PUT("/me/password", users.UpdatePassword)
+		// Trocar senha também é do Keycloak: mexer no hash local não muda o
+		// login de ninguém. Só fica de pé junto com o cadastro antigo.
+		if legacyAuthEnabled() {
+			protected.PUT("/me/password", users.UpdatePassword)
+		} else {
+			protected.PUT("/me/password", contaPeloKeycloak)
+		}
 		protected.DELETE("/me", users.DeleteMyAccount)
 		protected.POST("/me/become-teacher", users.BecomeTeacher)
 		protected.POST("/me/availability", users.SaveAvailabilityProfile)

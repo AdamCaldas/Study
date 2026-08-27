@@ -1,0 +1,43 @@
+version: "2"
+
+# ==========================================================
+# 🔍 VERIFICAÇÃO AUTOMÁTICA DE CÓDIGO
+# ==========================================================
+# Rode antes de cada commit:  golangci-lint run
+#
+# Por que isto existe: a auditoria encontrou um `Where("user_id = ?")` sem o
+# valor do parâmetro — a consulta não rodava e o relatório voltava vazio, sem
+# erro nenhum. Nenhum humano pega isso lendo o código; o lint pega de graça.
+
+linters:
+  enable:
+    - errcheck     # erro ignorado silenciosamente (ex.: Create sem checar retorno)
+    - govet        # problemas que o compilador não pega
+    - ineffassign  # atribuição que nunca é lida (foi o caso do notes_created)
+    - staticcheck  # a análise mais completa do ecossistema Go
+    - unused       # código morto
+    - bodyclose    # resposta HTTP sem Close (vaza conexão)
+    - rowserrcheck # erro de iteração de linhas do banco não verificado
+    - sqlclosecheck
+    - unconvert
+    # misspell fica DESLIGADO de propósito: o código e os comentários são em
+    # português, e ele acusa "monitores", "autor", "intervalos"... como erro.
+    - nilerr       # devolve nil quando havia erro
+
+  settings:
+    errcheck:
+      # Estes três são "melhor esforço" por natureza: escrita de CSV em memória
+      # e a serialização de resposta do Gin. Checá-los não muda nada.
+      exclude-functions:
+        - encoding/csv.(*Writer).Write
+        - (*github.com/gin-gonic/gin.Context).ShouldBindJSON
+
+  exclusions:
+    rules:
+      # Ferramentas e testes podem ser mais soltos.
+      - path: _test\.go
+        linters: [errcheck, unused]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

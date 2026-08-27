@@ -228,11 +228,12 @@ func SubmitQuiz(c *gin.Context) {
 	for _, question := range quiz.Questions {
 		studentAnswer, answered := input.Answers[question.ID.String()]
 
-		if question.QuestionType == "multiple_choice" {
+		switch question.QuestionType {
+		case "multiple_choice":
 			if answered && studentAnswer == question.CorrectAnswer {
 				totalScore += float64(question.Points)
 			}
-		} else if question.QuestionType == "open_ended" || question.QuestionType == "flashcard_generated" {
+		case "open_ended", "flashcard_generated":
 			hasOpenEnded = true
 		}
 	}
@@ -382,7 +383,7 @@ func ClaimCertificate(c *gin.Context) {
 	}
 
 	var totalScore float64 = 0
-	var pendingExams bool = false
+	pendingExams := false
 
 	for _, res := range results {
 		if res.Status == "pending_review" {

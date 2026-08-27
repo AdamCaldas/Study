@@ -56,7 +56,7 @@ func TouchDailyActivity(userID uuid.UUID) {
 		return
 	}
 
-	streak := 1
+	var streak int
 	switch {
 	case user.LastLoginAt.IsZero():
 		streak = 1 // primeiro acesso registrado
