@@ -121,7 +121,9 @@ func main() {
 	// para que a nuvem possa entregar só o hostname.
 	if bruto := os.Getenv("KEYCLOAK_ISSUER"); bruto != "" {
 		emitente := normalizaKeycloakURL(bruto, realm)
-		os.Setenv("KEYCLOAK_ISSUER", emitente)
+		if err := os.Setenv("KEYCLOAK_ISSUER", emitente); err != nil {
+			log.Printf("Aviso: não consegui normalizar KEYCLOAK_ISSUER: %v", err)
+		}
 		log.Printf("Keycloak: issuer esperado nos tokens = %s", emitente)
 	}
 
