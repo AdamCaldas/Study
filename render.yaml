@@ -1,0 +1,93 @@
+# ==========================================================
+# 🚀 BLUEPRINT DO RENDER — sobe a API e o Keycloak juntos
+# ==========================================================
+# Como usar:
+#   Render → New → Blueprint → aponte para este repositório.
+#   Ele cria os dois serviços já ligados um no outro.
+#
+# Depois de subir, defina no painel os valores marcados como sync:false
+# (são segredos: senha do banco, chave de e-mail, senha do admin).
+services:
+
+  # ----------------------------------------------------------
+  # 🔑 Keycloak — quem faz login. Precisa subir ANTES da API.
+  # ----------------------------------------------------------
+  - type: web
+    name: studfy-keycloak
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/keycloak/Dockerfile
+    dockerContext: ./deploy/keycloak
+    healthCheckPath: /realms/studfy
+    envVars:
+      - key: KC_BOOTSTRAP_ADMIN_USERNAME
+        value: admin
+      - key: KC_BOOTSTRAP_ADMIN_PASSWORD
+        sync: false          # defina no painel — é a senha do console do Keycloak
+      - key: KC_HOSTNAME_STRICT
+        value: "false"
+      - key: KC_DB
+        value: dev-file      # plano free: banco embutido. Em produção use postgres.
+
+  # ----------------------------------------------------------
+  # ⚙️ API — o backend Go
+  # ----------------------------------------------------------
+  - type: web
+    name: studfy-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health        # confere o banco de verdade, não só o processo
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: GIN_MODE
+        value: release
+
+      # --- Banco ---
+      - key: DATABASE_URL
+        sync: false                 # defina no painel (contém a senha)
+      - key: AUTO_MIGRATE
+        value: "false"              # ligue como "true" UMA vez, no primeiro deploy
+      # Supabase free + pooler: não abra conexões demais.
+      - key: DB_MAX_OPEN_CONNS
+        value: "10"
+      - key: DB_MAX_IDLE_CONNS
+        value: "4"
+
+      # --- Keycloak ---
+      # KEYCLOAK_URL = por onde a API BAIXA as chaves (rede interna, rápido).
+      # Vem como "host:porta"; a API completa com /realms/studfy sozinha.
+      - key: KEYCLOAK_URL
+        fromService:
+          name: studfy-keycloak
+          type: web
+          property: hostport
+      #
+      # ⚠️ KEYCLOAK_ISSUER = o que vem ESCRITO DENTRO do token (campo `iss`),
+      # que é sempre a URL PÚBLICA por onde o usuário fez login.
+      # Se ficar vazio, a API assume a URL interna e recusa TODO token com
+      # "issuer diferente do configurado" — parece token inválido, mas é config.
+      # Defina no painel como: https://studfy-keycloak.onrender.com/realms/studfy
+      - key: KEYCLOAK_ISSUER
+        sync: false
+      - key: KEYCLOAK_REALM
+        value: studfy
+      - key: KEYCLOAK_ONLY
+        value: "false"              # PRECISA ser false: o app usa a linha em `users`
+
+      # --- Login antigo: desligado, quem faz login é o Keycloak ---
+      - key: ENABLE_LEGACY_AUTH
+        value: "false"
+      - key: ALLOW_LEGACY_JWT
+        value: "false"
+      - key: JWT_SECRET
+        sync: false
+
+      # --- Front-end e e-mail ---
+      - key: FRONTEND_URL
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: SENDER_EMAIL
+        sync: false

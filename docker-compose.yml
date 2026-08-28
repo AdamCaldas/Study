@@ -28,10 +28,14 @@ services:
   # Sem este serviço a API dava log.Fatal no boot.
   # ==========================================================
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    build:
+      context: ./deploy/keycloak
+      dockerfile: Dockerfile
     container_name: studfy-keycloak
     restart: unless-stopped
-    command: start-dev
+    # start-dev + import do realm: sobe já com o cliente, os cargos e os
+    # usuários de teste prontos — sem precisar clicar no console.
+    command: start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}

@@ -1,0 +1,110 @@
+{
+  "realm": "studfy",
+  "displayName": "StudFy",
+  "enabled": true,
+
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": false,
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "waitIncrementSeconds": 60,
+  "failureFactor": 5,
+
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+
+  "roles": {
+    "realm": [
+      { "name": "user",    "description": "Aluno — o cargo padrão de quem se cadastra" },
+      { "name": "teacher", "description": "Professor — turmas criadas por ele viram Sala de Aula" },
+      { "name": "admin",   "description": "Administrador — libera o painel /v1/admin" }
+    ]
+  },
+
+  "defaultRoles": ["user", "offline_access", "uma_authorization"],
+
+  "clients": [
+    {
+      "clientId": "studfy-app",
+      "name": "StudFy — aplicativo",
+      "description": "Cliente publico do front-end (SPA/mobile). Usa PKCE, sem segredo.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "web-origins", "acr", "profile", "roles", "basic", "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-studfy",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "studfy-app",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "admin@studfy.com",
+      "email": "admin@studfy.com",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "StudFy",
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+      ],
+      "realmRoles": ["user", "admin", "teacher"]
+    },
+    {
+      "username": "professor@studfy.com",
+      "email": "professor@studfy.com",
+      "emailVerified": true,
+      "firstName": "Professor",
+      "lastName": "Teste",
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+      ],
+      "realmRoles": ["user", "teacher"]
+    },
+    {
+      "username": "aluno@studfy.com",
+      "email": "aluno@studfy.com",
+      "emailVerified": true,
+      "firstName": "Aluno",
+      "lastName": "Teste",
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+      ],
+      "realmRoles": ["user"]
+    }
+  ]
+}

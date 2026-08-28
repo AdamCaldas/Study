@@ -13,7 +13,6 @@ import (
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils" // 👈 Import adicionado
 
-	"github.com/MicahParks/keyfunc/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -22,7 +21,7 @@ import (
 // AuthMiddleware é o porteiro que protege as rotas privadas.
 // Valida o access token emitido pelo Keycloak usando as chaves públicas do
 // realm (JWKS), que são recarregadas em background pelo keyfunc.
-func AuthMiddleware(jwks *keyfunc.JWKS) gin.HandlerFunc {
+func AuthMiddleware(jwks *JWKSProvider) gin.HandlerFunc {
 	cfg := loadKeycloakConfig()
 
 	return func(c *gin.Context) {
@@ -35,6 +34,19 @@ func AuthMiddleware(jwks *keyfunc.JWKS) gin.HandlerFunc {
 
 		claims := &KeycloakClaims{}
 		token, err := jwt.ParseWithClaims(tokenString, claims, jwks.Keyfunc, cfg.parserOptions()...)
+
+		// Keycloak ainda não respondeu desde que a API subiu: não dá para
+		// validar token nenhum. Falha FECHADA (ninguém entra), mas com uma
+		// mensagem que diz a verdade em vez de culpar o token do usuário.
+		if errors.Is(err, ErrKeycloakIndisponivel) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":  "Serviço de login indisponível no momento. Tente de novo em instantes.",
+				"detail": "as chaves públicas do Keycloak ainda não foram carregadas",
+			})
+			c.Abort()
+			return
+		}
+
 		if err != nil || !token.Valid {
 			// Migração: aceita o token HS256 antigo só se ALLOW_LEGACY_JWT estiver ligado.
 			if cfg.allowLegacy {

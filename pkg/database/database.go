@@ -16,6 +16,26 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// abrirComTeste abre a conexão E confere que ela responde. O gorm.Open é
+// preguiçoso: sem o ping, um DSN recusado só estouraria na primeira consulta.
+func abrirComTeste(dsn string, cfg *gorm.Config) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(dsn), cfg)
+	if err != nil {
+		return nil, err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
 // Ping confirma que o banco responde de verdade — usado pelo /health para o
 // balanceador não mandar tráfego para uma instância sem banco.
 func Ping(ctx context.Context) error {
@@ -71,16 +91,32 @@ func ConnectDB() {
 	// Sem isto, UMA consulta lenta segura a conexão indefinidamente; num pico,
 	// poucas travadas consomem o pool e todos os alunos recebem erro.
 	// O próprio Postgres derruba a consulta passando do limite.
-	dsn = withStatementTimeout(dsn, envInt("DB_STATEMENT_TIMEOUT_MS", 15000))
+	//
+	// ⚠️ Pools externos (PgBouncer, Supavisor do Supabase na porta 6543) podem
+	// RECUSAR o parâmetro `options` na conexão. Por isso tentamos com ele e,
+	// se a conexão falhar, repetimos sem — melhor perder o prazo máximo do que
+	// não conectar no banco.
+	dsnComPrazo := withStatementTimeout(dsn, envInt("DB_STATEMENT_TIMEOUT_MS", 15000))
 
 	// Iniciamos a conexão com o logger apenas para avisos críticos para não poluir o terminal
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+	cfg := &gorm.Config{
+		// PrepareStmt precisa ficar FALSE com pool em modo transação
+		// (PgBouncer/Supavisor): statements preparados não sobrevivem à troca
+		// de conexão e quebram com "prepared statement does not exist".
 		PrepareStmt: false,
 		Logger:      logger.Default.LogMode(logger.Warn),
-	})
+	}
 
+	db, err := abrirComTeste(dsnComPrazo, cfg)
 	if err != nil {
-		log.Fatal("Falha ao conectar no banco de dados: ", err)
+		log.Printf("Aviso: o banco recusou a conexão com prazo máximo de consulta (%v).", err)
+		log.Println("Aviso: tentando sem `options` — comum em pool de conexões (Supabase/PgBouncer).")
+		log.Println("Aviso: defina o statement_timeout no próprio banco/role para manter a proteção.")
+
+		db, err = abrirComTeste(dsn, cfg)
+		if err != nil {
+			log.Fatal("Falha ao conectar no banco de dados: ", err)
+		}
 	}
 
 	sqlDB, err := db.DB()

@@ -22,7 +22,6 @@ import (
 	"studfy-backend/internal/users"
 	"studfy-backend/pkg/database"
 
-	"github.com/MicahParks/keyfunc/v2" // 👈 1. IMPORT ADICIONADO
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -48,6 +47,41 @@ func contaPeloKeycloak(c *gin.Context) {
 	})
 }
 
+// normalizaKeycloakURL aceita a URL do Keycloak em qualquer formato razoável e
+// devolve sempre a URL COMPLETA DO REALM.
+//
+// Existe porque plataformas de nuvem entregam só "host:porta" (o Render, por
+// exemplo, com fromService/hostport). Sem isto, faltava o esquema e o
+// /realms/<nome>, o JWKS nunca era encontrado e a API subia sem conseguir
+// validar token nenhum.
+//
+// Aceita:
+//
+//	""                                  → http://localhost:8080/realms/studfy
+//	"studfy-keycloak:10000"             → http://studfy-keycloak:10000/realms/studfy
+//	"https://kc.onrender.com"           → https://kc.onrender.com/realms/studfy
+//	"https://kc.onrender.com/realms/x"  → mantém como está
+func normalizaKeycloakURL(bruta, realm string) string {
+	bruta = strings.TrimSpace(strings.TrimRight(bruta, "/"))
+	if realm = strings.TrimSpace(realm); realm == "" {
+		realm = "studfy"
+	}
+	if bruta == "" {
+		return "http://localhost:8080/realms/" + realm
+	}
+
+	// Sem esquema? Nome de serviço interno da nuvem: http basta (rede privada).
+	if !strings.HasPrefix(bruta, "http://") && !strings.HasPrefix(bruta, "https://") {
+		bruta = "http://" + bruta
+	}
+
+	// Já aponta para um realm: respeita o que foi configurado.
+	if strings.Contains(bruta, "/realms/") {
+		return bruta
+	}
+	return bruta + "/realms/" + realm
+}
+
 func main() {
 	// 1. Carrega Variáveis de Ambiente
 	err := godotenv.Load()
@@ -61,36 +95,25 @@ func main() {
 	// ==========================================================
 	// 🔑 KEYCLOAK OIDC / JWKS
 	// ==========================================================
-	keycloakURL := os.Getenv("KEYCLOAK_URL")
-	if keycloakURL == "" {
-		keycloakURL = "http://localhost:8080/realms/studfy"
-	}
+	keycloakURL := normalizaKeycloakURL(os.Getenv("KEYCLOAK_URL"), os.Getenv("KEYCLOAK_REALM"))
 	jwksURL := keycloakURL + "/protocol/openid-connect/certs"
+	log.Printf("Keycloak: realm em %s", keycloakURL)
 
-	// Carrega e atualiza as chaves públicas do Keycloak em background.
-	// Tentamos algumas vezes porque o Keycloak pode ainda estar subindo.
-	jwksOptions := keyfunc.Options{
-		RefreshInterval:   time.Hour, // recarrega as chaves de hora em hora
-		RefreshUnknownKID: true,      // busca a chave na hora se o `kid` for novo (rotação)
-		RefreshTimeout:    10 * time.Second,
-		RefreshErrorHandler: func(err error) {
-			log.Printf("Aviso: falha ao atualizar as chaves do Keycloak: %v", err)
-		},
+	// Busca as chaves públicas do realm.
+	//
+	// ⚠️ Aqui a API NÃO morre mais se o Keycloak estiver fora.
+	// Antes era log.Fatal: sem Keycloak o processo encerrava, o deploy falhava e
+	// nem o /health respondia — impossível diagnosticar em nuvem.
+	// Agora ela sobe do mesmo jeito e continua tentando em segundo plano.
+	// Enquanto as chaves não chegam, toda rota protegida responde 503: falha
+	// FECHADA, ninguém entra sem token validado.
+	jwks := auth.NewJWKSProvider(jwksURL)
+	if !jwks.Carregar(3, 2*time.Second) {
+		log.Println("⚠️  Keycloak indisponível em " + jwksURL)
+		log.Println("⚠️  A API vai subir assim mesmo, mas as rotas protegidas responderão 503")
+		log.Println("⚠️  até o Keycloak responder. Confira a variável KEYCLOAK_URL.")
+		jwks.CarregarEmSegundoPlano()
 	}
-
-	var jwks *keyfunc.JWKS
-	for attempt := 1; attempt <= 5; attempt++ {
-		jwks, err = keyfunc.Get(jwksURL, jwksOptions)
-		if err == nil {
-			break
-		}
-		log.Printf("Tentativa %d/5: Keycloak indisponível em %s (%v)", attempt, jwksURL, err)
-		time.Sleep(3 * time.Second)
-	}
-	if err != nil {
-		log.Fatalf("Erro ao carregar chaves públicas do Keycloak (%s): %v", jwksURL, err)
-	}
-	log.Printf("Keycloak: chaves públicas carregadas de %s", jwksURL)
 
 	// 3. Inicia o Roteador Gin em Release Mode se estiver em produção
 	if os.Getenv("GIN_MODE") == "release" {
@@ -125,14 +148,33 @@ func main() {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
 
-		if err := database.Ping(ctx); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"status":   "degradado",
-				"database": "inacessível",
-			})
+		bancoOK := database.Ping(ctx) == nil
+		keycloakOK := jwks.Pronto()
+
+		estado := gin.H{
+			"status":   "ok",
+			"database": "ok",
+			"keycloak": "ok",
+		}
+		if !bancoOK {
+			estado["database"] = "inacessível"
+		}
+		if !keycloakOK {
+			estado["keycloak"] = "indisponível"
+			estado["keycloak_url"] = jwks.URL()
+		}
+
+		// Sem banco a API não serve para nada: 503 tira a instância do balanceador.
+		// Sem Keycloak ela ainda responde rotas públicas, então segue "ok" com aviso.
+		if !bancoOK {
+			estado["status"] = "degradado"
+			c.JSON(http.StatusServiceUnavailable, estado)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "database": "ok"})
+		if !keycloakOK {
+			estado["status"] = "parcial"
+		}
+		c.JSON(http.StatusOK, estado)
 	})
 
 	// ----------------------------------------------------------
