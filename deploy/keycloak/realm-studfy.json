@@ -78,7 +78,7 @@
       "lastName": "StudFy",
       "enabled": true,
       "credentials": [
-        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+        { "type": "password", "value": "${DEMO_PASSWORD}", "temporary": false }
       ],
       "realmRoles": ["user", "admin", "teacher"]
     },
@@ -90,7 +90,7 @@
       "lastName": "Teste",
       "enabled": true,
       "credentials": [
-        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+        { "type": "password", "value": "${DEMO_PASSWORD}", "temporary": false }
       ],
       "realmRoles": ["user", "teacher"]
     },
@@ -102,7 +102,7 @@
       "lastName": "Teste",
       "enabled": true,
       "credentials": [
-        { "type": "password", "value": "TROQUE-ESTA-SENHA", "temporary": false }
+        { "type": "password", "value": "${DEMO_PASSWORD}", "temporary": false }
       ],
       "realmRoles": ["user"]
     }

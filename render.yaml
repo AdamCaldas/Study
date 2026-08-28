@@ -24,6 +24,10 @@ services:
         value: admin
       - key: KC_BOOTSTRAP_ADMIN_PASSWORD
         sync: false          # defina no painel — é a senha do console do Keycloak
+      # Senha dos 3 usuários de demonstração (admin@ / professor@ / aluno@).
+      # Fica SÓ aqui no painel: o repositório é público, nenhuma senha vai no código.
+      - key: DEMO_PASSWORD
+        sync: false
       - key: KC_HOSTNAME_STRICT
         value: "false"
       - key: KC_DB
@@ -68,9 +72,13 @@ services:
       # que é sempre a URL PÚBLICA por onde o usuário fez login.
       # Se ficar vazio, a API assume a URL interna e recusa TODO token com
       # "issuer diferente do configurado" — parece token inválido, mas é config.
-      # Defina no painel como: https://studfy-keycloak.onrender.com/realms/studfy
+      # Preenchido automaticamente com a URL pública do serviço do Keycloak.
+      # A API completa com /realms/studfy sozinha.
       - key: KEYCLOAK_ISSUER
-        sync: false
+        fromService:
+          name: studfy-keycloak
+          type: web
+          property: host
       - key: KEYCLOAK_REALM
         value: studfy
       - key: KEYCLOAK_ONLY

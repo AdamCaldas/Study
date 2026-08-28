@@ -20,6 +20,15 @@ func TestNormalizaKeycloakURL(t *testing.T) {
 		{"https://kc.exemplo.com", "empresa", "https://kc.exemplo.com/realms/empresa"},
 		// espaços acidentais no painel da nuvem
 		{"  https://kc.exemplo.com  ", "", "https://kc.exemplo.com/realms/studfy"},
+
+		// 🔑 O CASO QUE QUEBRA TUDO SE ERRAR O ESQUEMA:
+		// o Render entrega o issuer como hostname puro. Tem que virar HTTPS,
+		// senão o `iss` do token (https) nunca bate e toda requisição é recusada.
+		{"studfy-keycloak.onrender.com", "", "https://studfy-keycloak.onrender.com/realms/studfy"},
+		// já nome de serviço interno (sem ponto) continua http — rede privada
+		{"studfy-keycloak", "", "http://studfy-keycloak/realms/studfy"},
+		{"localhost:8080", "", "http://localhost:8080/realms/studfy"},
+		{"127.0.0.1:8080", "", "http://127.0.0.1:8080/realms/studfy"},
 	}
 
 	for _, c := range casos {

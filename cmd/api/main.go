@@ -70,9 +70,25 @@ func normalizaKeycloakURL(bruta, realm string) string {
 		return "http://localhost:8080/realms/" + realm
 	}
 
-	// Sem esquema? Nome de serviço interno da nuvem: http basta (rede privada).
+	// Sem esquema, precisamos adivinhar — e adivinhar errado quebra tudo:
+	// o `iss` do token viria com https e a API compararia com http, recusando
+	// TODO token com "issuer diferente do configurado".
+	//
+	// Regra: domínio público (tem ponto e não é localhost) → https.
+	// Nome de serviço interno ou localhost → http (rede privada, sem TLS).
 	if !strings.HasPrefix(bruta, "http://") && !strings.HasPrefix(bruta, "https://") {
-		bruta = "http://" + bruta
+		semPorta := bruta
+		if i := strings.Index(semPorta, ":"); i > 0 {
+			semPorta = semPorta[:i]
+		}
+		publico := strings.Contains(semPorta, ".") &&
+			!strings.HasPrefix(semPorta, "localhost") &&
+			!strings.HasPrefix(semPorta, "127.")
+		if publico {
+			bruta = "https://" + bruta
+		} else {
+			bruta = "http://" + bruta
+		}
 	}
 
 	// Já aponta para um realm: respeita o que foi configurado.
@@ -95,9 +111,19 @@ func main() {
 	// ==========================================================
 	// 🔑 KEYCLOAK OIDC / JWKS
 	// ==========================================================
-	keycloakURL := normalizaKeycloakURL(os.Getenv("KEYCLOAK_URL"), os.Getenv("KEYCLOAK_REALM"))
+	realm := os.Getenv("KEYCLOAK_REALM")
+	keycloakURL := normalizaKeycloakURL(os.Getenv("KEYCLOAK_URL"), realm)
 	jwksURL := keycloakURL + "/protocol/openid-connect/certs"
-	log.Printf("Keycloak: realm em %s", keycloakURL)
+	log.Printf("Keycloak: buscando as chaves em %s", keycloakURL)
+
+	// O `iss` do token é sempre a URL PÚBLICA por onde a pessoa fez login —
+	// diferente da interna usada acima para baixar as chaves. Normalizamos aqui
+	// para que a nuvem possa entregar só o hostname.
+	if bruto := os.Getenv("KEYCLOAK_ISSUER"); bruto != "" {
+		emitente := normalizaKeycloakURL(bruto, realm)
+		os.Setenv("KEYCLOAK_ISSUER", emitente)
+		log.Printf("Keycloak: issuer esperado nos tokens = %s", emitente)
+	}
 
 	// Busca as chaves públicas do realm.
 	//
