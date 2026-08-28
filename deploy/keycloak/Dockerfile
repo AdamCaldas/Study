@@ -1,24 +1,47 @@
 # ==========================================================
-# 🔑 KEYCLOAK do StudFy — já sobe com o realm configurado
+# 🔑 KEYCLOAK do StudFy — enxuto o bastante para 512 MB
 # ==========================================================
-# O realm-studfy.json é importado no primeiro boot: cria o realm, o cliente
-# do front (studfy-app), os cargos (user/teacher/admin) e os usuários de teste.
-# Assim, no minuto em que o serviço subir, já dá para logar e testar.
+# Duas coisas derrubavam este contêiner no plano free:
+#
+# 1) MEMÓRIA (saía com status 137 = morto por falta de RAM).
+#    O Keycloak se auto-compila ao ligar ("installing your custom providers"),
+#    e isso não cabe em 512 MB. Aqui essa compilação é feita no BUILD, onde há
+#    folga, e o contêiner sobe já pronto com `--optimized`.
+#
+# 2) PORTA ("No open ports detected"). O Keycloak abre a 8080, mas a nuvem
+#    manda a porta na variável PORT e fica esperando ali. Agora ele escuta
+#    exatamente onde mandarem.
+
+# ---------- etapa 1: compila (com folga de recursos) ----------
+FROM quay.io/keycloak/keycloak:26.0 AS builder
+
+ENV KC_DB=dev-file
+ENV KC_HEALTH_ENABLED=true
+# Sem cluster: é uma instância só. O modo cluster tenta parear com os
+# contêineres vizinhos da nuvem e trava o boot com erros de JGroups/NioServer.
+ENV KC_CACHE=local
+
+RUN /opt/keycloak/bin/kc.sh build
+
+# ---------- etapa 2: a imagem que roda ----------
 FROM quay.io/keycloak/keycloak:26.0
 
+COPY --from=builder /opt/keycloak/ /opt/keycloak/
 COPY realm-studfy.json /opt/keycloak/data/import/realm-studfy.json
 
-# Atrás do proxy da nuvem o TLS termina antes de chegar aqui. Sem isto o
+ENV KC_DB=dev-file
+ENV KC_CACHE=local
+ENV KC_HEALTH_ENABLED=true
+ENV KC_HTTP_ENABLED=true
+ENV KC_HOSTNAME_STRICT=false
+# Atrás do proxy da nuvem o TLS termina antes de chegar aqui; sem isto o
 # Keycloak monta as URLs com http e o login entra em loop de redirecionamento.
 ENV KC_PROXY_HEADERS=xforwarded
-ENV KC_HTTP_ENABLED=true
-ENV KC_HEALTH_ENABLED=true
-ENV KC_HOSTNAME_STRICT=false
 
-# ⚠️ `start-dev` e NÃO `start`.
-# O modo `start` (produção) liga o cluster do Infinispan/JGroups: numa rede
-# compartilhada de nuvem ele tenta parear com containers vizinhos e enche o log
-# de "NioServer ... cookie does not match own cookie", sem nunca subir.
-# `start-dev` usa cache local, aceita o banco embutido e é o suficiente para
-# uma instância única — que é o caso aqui (plano free, um contêiner só).
-ENTRYPOINT ["/opt/keycloak/bin/kc.sh", "start-dev", "--import-realm"]
+# Teto de memória da JVM. Sem isto o Java tenta usar a máquina inteira,
+# estoura os 512 MB do plano free e o contêiner é morto (status 137).
+ENV JAVA_OPTS_APPEND="-Xms64m -Xmx320m -XX:MaxMetaspaceSize=128m"
+
+# Forma shell (e não exec) de propósito: precisamos expandir ${PORT}, que a
+# nuvem define em tempo de execução. Local, sem PORT, cai para 8080.
+ENTRYPOINT ["/bin/sh", "-c", "exec /opt/keycloak/bin/kc.sh start --optimized --import-realm --http-port=${PORT:-8080}"]
