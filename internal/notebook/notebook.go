@@ -42,6 +42,51 @@ func canEditNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) 
 }
 
 // ==========================================================
+// 👀 QUEM PODE LER ESTE CADERNO
+// ==========================================================
+// Ler é diferente de editar: o aluno da turma precisa abrir o material, mas
+// quem NÃO é da turma não pode nem enxergar.
+//
+// Faltava esta checagem: as rotas de leitura ficam fora do contexto da turma
+// (/v1/app/notebooks/:id), então nada conferia nada — qualquer pessoa logada
+// abria o caderno de qualquer turma sabendo o id.
+func canReadNotebook(spaceID uuid.UUID, notebookID uuid.UUID, userID uuid.UUID) bool {
+	// 1. É o dono da turma?
+	var space models.Space
+	if err := database.DB.Select("id").Where("id = ? AND owner_id = ?", spaceID, userID).First(&space).Error; err == nil {
+		return true
+	}
+
+	// 2. Faz parte da turma (qualquer cargo)?
+	var spPerm models.SpacePermission
+	if err := database.DB.Select("id").Where("space_id = ? AND user_id = ?", spaceID, userID).First(&spPerm).Error; err == nil {
+		return true
+	}
+
+	// 3. Recebeu acesso só a este caderno (é assim que a automação do professor
+	//    libera material de reforço para um aluno específico).
+	var nbPerm models.NotebookPermission
+	if err := database.DB.Select("id").Where("notebook_id = ? AND user_id = ?", notebookID, userID).First(&nbPerm).Error; err == nil {
+		return true
+	}
+
+	return false
+}
+
+// canReadGuide confere o acesso à turma dona da guia.
+func canReadGuide(guideID uuid.UUID, userID uuid.UUID) bool {
+	var guide models.Guide
+	if err := database.DB.Select("id", "notebook_id").Where("id = ?", guideID).First(&guide).Error; err != nil {
+		return false
+	}
+	var nb models.Notebook
+	if err := database.DB.Select("id", "space_id").Where("id = ?", guide.NotebookID).First(&nb).Error; err != nil {
+		return false
+	}
+	return canReadNotebook(nb.SpaceID, nb.ID, userID)
+}
+
+// ==========================================================
 // 1️⃣ CREATE NOTEBOOK
 // ==========================================================
 type CreateNotebookInput struct {
@@ -267,7 +312,18 @@ func ListSpaceNotebooks(c *gin.Context) {
 // 📖 4. GET /notebooks/:notebook_id (O RECHEIO DO CADERNO)
 // ==========================================================
 func GetNotebookFull(c *gin.Context) {
-	notebookID := c.Param("notebook_id")
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
+	notebookIDStr := c.Param("notebook_id")
+	notebookID, err := uuid.Parse(notebookIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Caderno inválido"})
+		return
+	}
 
 	var notebook models.Notebook
 	// Aqui sim a gente usa o Preload para trazer as Pastas (Guides) e as Páginas!
@@ -281,6 +337,15 @@ func GetNotebookFull(c *gin.Context) {
 		Preload("Guides.SubGuides.Pages"). // Se tiver sub-pastas
 		Where("id = ?", notebookID).
 		First(&notebook).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
+		return
+	}
+
+	// 🛡️ Só quem é da turma abre o material. Sem isto, qualquer pessoa logada
+	// lia o caderno de qualquer turma sabendo o id.
+	// Responde 404 (e não 403) de propósito: um 403 confirmaria que o caderno
+	// existe, o que já é informação para quem está tentando adivinhar ids.
+	if !canReadNotebook(notebook.SpaceID, notebook.ID, parsedUserID) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
 		return
 	}

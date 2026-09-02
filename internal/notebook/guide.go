@@ -92,8 +92,21 @@ func UpdateGuide(c *gin.Context) {
 		return
 	}
 
+	parsedGuideID, err := uuid.Parse(guideID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
+		return
+	}
+
+	// 🛡️ Faltava esta checagem: qualquer pessoa logada editava a guia de
+	// qualquer turma sabendo o id.
+	if !canEditGuide(parsedGuideID, userUUID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Você não tem permissão para editar esta guia."})
+		return
+	}
+
 	var guide models.Guide
-	if err := database.DB.Where("id = ?", guideID).First(&guide).Error; err != nil {
+	if err := database.DB.Where("id = ?", parsedGuideID).First(&guide).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Guia não encontrada"})
 		return
 	}

@@ -88,10 +88,22 @@ func CreatePage(c *gin.Context) {
 // 📋 LISTAR PÁGINAS DA GUIA (Para o Mayan renderizar o A4)
 // ==========================================================
 func ListPagesByGuide(c *gin.Context) {
+	parsedUserID, err := utils.GetUserID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Utilizador não autenticado"})
+		return
+	}
+
 	guideIDStr := c.Param("guide_id")
 	parsedGuideID, err := uuid.Parse(guideIDStr)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ID da Guia inválido"})
+		return
+	}
+
+	// 🛡️ Só quem é da turma lê as páginas.
+	if !canReadGuide(parsedGuideID, parsedUserID) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Guia não encontrada"})
 		return
 	}
 
