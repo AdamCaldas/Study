@@ -1,6 +1,7 @@
 package notebook
 
 import (
+	"log"
 	"net/http"
 
 	"studfy-backend/internal/models"
@@ -176,7 +177,11 @@ func ReorderGuides(c *gin.Context) {
 			return
 		}
 	}
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar a ordem das guias. Tente de novo."})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "Ordem das guias atualizada com sucesso!"})
 }
 

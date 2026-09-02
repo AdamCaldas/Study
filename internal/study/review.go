@@ -1,6 +1,7 @@
 package study
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -220,7 +221,11 @@ func CompleteReview(c *gin.Context) {
 		return
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível concluir a revisão. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Revisão concluída!",

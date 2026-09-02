@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"os"
@@ -82,7 +83,9 @@ func Register(c *gin.Context) {
 		Code:      code,
 		ExpiresAt: time.Now().Add(10 * time.Minute),
 	}
-	database.DB.Create(&verificationCode)
+	if err := database.DB.Create(&verificationCode).Error; err != nil {
+		log.Printf("código de verificação de %s: %v", newUser.Email, err)
+	}
 
 	go utils.SendVerificationEmail(newUser.Email, newUser.FullName, code)
 

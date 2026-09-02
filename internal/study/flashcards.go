@@ -285,7 +285,10 @@ func DeleteFlashcard(c *gin.Context) {
 		return
 	}
 
-	database.DB.Delete(&card)
+	if err := database.DB.Delete(&card).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar o flashcard."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Flashcard apagado da turma!"})
 }

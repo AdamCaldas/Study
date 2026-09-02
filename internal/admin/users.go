@@ -167,7 +167,11 @@ func DeleteAnyUser(c *gin.Context) {
 	}
 
 	// Confirma a destruição total!
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível concluir a exclusão. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Usuário ANIQUILADO com sucesso! Foi de base, virou saudade e não sobrou nem poeira no banco de dados. 💀💥🧹",
@@ -223,7 +227,11 @@ func MassDeleteUsers(c *gin.Context) {
 	}
 
 	// Confirma a aniquilação!
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível concluir a exclusão. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("ANIQUILAÇÃO EM MASSA CONCLUÍDA! %d usuários foram de arrasta pra cima. O Thanos estalou os dedos e limpou o servidor! 💀💥🌩️", result.RowsAffected),

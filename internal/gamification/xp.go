@@ -1,6 +1,7 @@
 package gamification
 
 import (
+	"log"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/cache"
@@ -92,7 +93,11 @@ func RewardXP(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar XP"})
 		return
 	}
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível concluir a operação. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "XP ganho com sucesso!",
@@ -249,7 +254,11 @@ func CompleteFlashMission(c *gin.Context) {
 		return
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível concluir a operação. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "Missão cumprida! XP resgatado.",

@@ -2,6 +2,7 @@ package study
 
 import (
 	"encoding/json"
+	"log"
 	"math"
 	"net/http"
 	"time"
@@ -469,7 +470,11 @@ func AdvanceCycleStep(c *gin.Context) {
 		}
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar o ciclo. Tente de novo."})
+		return
+	}
 
 	// O aluno acabou de estudar: os painéis dele mudaram.
 	InvalidateUserDashboard(userID)
@@ -519,7 +524,10 @@ func CreateCycleBlock(c *gin.Context) {
 		NotebookID: input.NotebookID,
 	}
 
-	database.DB.Create(&newBlock)
+	if err := database.DB.Create(&newBlock).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao adicionar o card."})
+		return
+	}
 	c.JSON(http.StatusCreated, gin.H{"message": "Card adicionado ao ciclo!", "block": newBlock})
 }
 
@@ -699,7 +707,11 @@ func UpdateFullCycle(c *gin.Context) {
 		}
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar o ciclo. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Ciclo inteiro atualizado com sucesso!"})
 }

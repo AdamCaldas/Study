@@ -3,6 +3,7 @@ package study
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"time"
@@ -447,7 +448,11 @@ func GenerateAutoPlan(c *gin.Context) {
 		}
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar o cronograma. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Cronograma da semana configurado com sucesso!",
@@ -766,7 +771,11 @@ func UpdateFullPlan(c *gin.Context) {
 		}
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar o cronograma. Tente de novo."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Cronograma inteiro atualizado com sucesso!"})
 }
@@ -868,7 +877,11 @@ func ExecutePlanBlock(c *gin.Context) {
 	}
 	tx.Create(&session)
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		log.Printf("commit falhou: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar o cronograma. Tente de novo."})
+		return
+	}
 
 	// O aluno acabou de estudar: os painéis dele mudaram.
 	InvalidateUserDashboard(userID)
@@ -913,7 +926,10 @@ func CreateStudyPlan(c *gin.Context) {
 		NotebookID: input.NotebookID,
 	}
 
-	database.DB.Create(&newBlock)
+	if err := database.DB.Create(&newBlock).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao adicionar o bloco."})
+		return
+	}
 	c.JSON(http.StatusCreated, gin.H{"message": "Bloco adicionado!", "block": newBlock})
 }
 
@@ -945,7 +961,14 @@ func CreateMultipleStudyPlans(c *gin.Context) {
 			NotebookID: p.NotebookID,
 		})
 	}
-	database.DB.Create(&blocks)
+	if len(blocks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Envie ao menos um bloco."})
+		return
+	}
+	if err := database.DB.Create(&blocks).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar os blocos."})
+		return
+	}
 	c.JSON(http.StatusCreated, gin.H{"message": "Blocos salvos com sucesso!"})
 }
 
@@ -1110,6 +1133,14 @@ func AutoFitPlanBlocks(c *gin.Context) {
 		}
 	}
 
+	// Os horários calculados são guardados aqui e gravados de uma vez só no fim.
+	type ajusteDeHorario struct {
+		ID     uuid.UUID
+		Inicio string
+		Fim    string
+	}
+	var ajustes []ajusteDeHorario
+
 	blocksByDay := make(map[int][]models.StudyBlock)
 	for _, b := range strategy.Blocks {
 		if b.DayOfWeek != nil {
@@ -1160,16 +1191,39 @@ func AutoFitPlanBlocks(c *gin.Context) {
 			startStr := minutesToHHMM(currentCursorMin)
 			endStr := minutesToHHMM(currentCursorMin + duration)
 
-			database.DB.Model(&models.StudyBlock{}).Where("id = ?", block.ID).Updates(map[string]interface{}{
-				"start_time": startStr,
-				"end_time":   endStr,
-			})
+			// Acumula em vez de gravar aqui dentro: um UPDATE por bloco significa
+			// dezenas de idas ao banco num clique só. Tudo vai numa transação
+			// depois do laço.
+			ajustes = append(ajustes, ajusteDeHorario{ID: block.ID, Inicio: startStr, Fim: endStr})
 
 			currentCursorMin += duration + 15
 		}
 	}
 
+	// Grava tudo numa transação: ou o cronograma inteiro fica coerente, ou
+	// nada muda. Antes cada bloco era um UPDATE solto — se falhasse no meio, o
+	// aluno ficava com metade da agenda com horário novo e metade sem.
+	if len(ajustes) > 0 {
+		tx := database.DB.Begin()
+		for _, a := range ajustes {
+			if err := tx.Model(&models.StudyBlock{}).Where("id = ?", a.ID).Updates(map[string]interface{}{
+				"start_time": a.Inicio,
+				"end_time":   a.Fim,
+			}).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao encaixar os horários."})
+				return
+			}
+		}
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("autofit: commit falhou: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível salvar os horários. Tente de novo."})
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Cronograma otimizado com sucesso com base na sua rotina!",
+		"message":          "Cronograma otimizado com sucesso com base na sua rotina!",
+		"blocos_ajustados": len(ajustes),
 	})
 }

@@ -1,6 +1,7 @@
 package space
 
 import (
+	"log"
 	"net/http"
 
 	"studfy-backend/internal/models"
@@ -146,7 +147,11 @@ func RespondSpaceRequest(c *gin.Context) {
 			return
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("commit falhou: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível responder a solicitação. Tente de novo."})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "Solicitação aceita! Usuário agora é " + input.AccessLevel})
 		return
 	}
@@ -158,7 +163,11 @@ func RespondSpaceRequest(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao rejeitar solicitação"})
 			return
 		}
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			log.Printf("commit falhou: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Não foi possível responder a solicitação. Tente de novo."})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "Solicitação rejeitada com sucesso."})
 		return
 	}

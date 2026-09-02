@@ -338,11 +338,17 @@ func GetOrUpdateStudentDossier(c *gin.Context) {
 				TeacherID: teacherID,
 				Content:   input.Content,
 			}
-			database.DB.Create(&newDossier)
+			if err := database.DB.Create(&newDossier).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o dossiê."})
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"message": "Dossiê criado com sucesso!", "dossier": newDossier})
 		} else {
 			// Atualiza o existente
-			database.DB.Model(&dossier).Update("content", input.Content)
+			if err := database.DB.Model(&dossier).Update("content", input.Content).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar o dossiê."})
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{"message": "Dossiê atualizado com sucesso!"})
 		}
 	}
@@ -598,7 +604,10 @@ func GenerateAttendanceQR(c *gin.Context) {
 		ExpiresAt: expires,
 		IsActive:  true,
 	}
-	database.DB.Create(&session)
+	if err := database.DB.Create(&session).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar a chamada."})
+		return
+	}
 
 	// O Front-end pega esse "qr_token" e usa uma biblioteca (ex: qrcode.react) para desenhar o quadrado preto e branco na tela!
 	c.JSON(http.StatusCreated, gin.H{
@@ -816,7 +825,10 @@ func CreateAutomationRule(c *gin.Context) {
 		TargetContentID: input.TargetContentID,
 	}
 
-	database.DB.Create(&rule)
+	if err := database.DB.Create(&rule).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar a automação."})
+		return
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Automação ativada! O StudFy vai monitorar as notas da turma.",

@@ -446,7 +446,10 @@ func FollowTeacher(c *gin.Context) {
 		FollowerID:  followerID,
 		FollowingID: teacherID,
 	}
-	database.DB.Create(&newFollow)
+	if err := database.DB.Create(&newFollow).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao seguir o professor."})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Agora está a seguir " + teacher.FullName})
 }
@@ -543,7 +546,10 @@ func SaveAvailabilityProfile(c *gin.Context) {
 			Update("is_default", false)
 	}
 
-	database.DB.Create(&profile)
+	if err := database.DB.Create(&profile).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar a rotina."})
+		return
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Rotina salva!", "profile": profile})
 }
