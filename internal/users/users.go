@@ -2,6 +2,7 @@ package users
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -42,25 +43,38 @@ func GetMyProfile(c *gin.Context) {
 		skills = []string{}
 	}
 
-	var totalNotebooks, totalPages int64
-	database.DB.Model(&models.Notebook{}).Where("created_by_id = ?", userID).Count(&totalNotebooks)
-	database.DB.Model(&models.Page{}).Where("created_by_id = ?", userID).Count(&totalPages)
+	// As quatro contagens vão numa consulta só. Antes eram quatro idas ao banco
+	// para montar a mesma tela — e a de páginas varria a tabela inteira, porque
+	// created_by_id não tinha índice.
+	var contagens struct {
+		Cadernos    int64
+		Paginas     int64
+		Estrategias int64
+		Notas       int64
+	}
+	if err := database.DB.Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM notebooks         WHERE created_by_id = ?) AS cadernos,
+			(SELECT COUNT(*) FROM pages             WHERE created_by_id = ?) AS paginas,
+			(SELECT COUNT(*) FROM study_strategies  WHERE created_by_id = ?) AS estrategias,
+			(SELECT COUNT(*) FROM quick_notes qn
+			   JOIN spaces s ON s.id = qn.space_id
+			  WHERE s.owner_id = ?) AS notas
+	`, userID, userID, userID, userID).Scan(&contagens).Error; err != nil {
+		log.Printf("contagens do perfil de %s: %v", userID, err)
+	}
+
+	totalNotebooks := contagens.Cadernos
+	totalPages := contagens.Paginas
+	qtdNotebooks := contagens.Cadernos
+	qtdStrategies := contagens.Estrategias
+	qtdNotes := contagens.Notas
 
 	achievements := []gin.H{
 		{"id": 1, "name": "Mestre das Revisões", "icon_url": "url-do-trofeu", "is_unlocked": true},
 		{"id": 2, "name": "Foco Absoluto", "icon_url": "url-do-trofeu", "is_unlocked": true},
 		{"id": 3, "name": "Escritor Ávido", "icon_url": "url-do-trofeu", "is_unlocked": false},
 	}
-
-	// Reaproveita a contagem de cadernos já feita acima (era a mesma query repetida).
-	qtdNotebooks := totalNotebooks
-	var qtdNotes, qtdStrategies int64
-	database.DB.Model(&models.StudyStrategy{}).Where("created_by_id = ?", userID).Count(&qtdStrategies)
-
-	database.DB.Table("quick_notes").
-		Joins("JOIN spaces ON spaces.id = quick_notes.space_id").
-		Where("spaces.owner_id = ?", userID).
-		Count(&qtdNotes)
 
 	var userStrategies []models.StudyStrategy
 	database.DB.Preload("Blocks").

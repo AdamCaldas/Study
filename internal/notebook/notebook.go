@@ -329,19 +329,29 @@ func GetNotebookFull(c *gin.Context) {
 
 	var notebook models.Notebook
 	// Aqui sim a gente usa o Preload para trazer as Pastas (Guides) e as Páginas!
-	// Teto em cada nível: um caderno com milhares de páginas travava o app do
-	// aluno e a memória do servidor, porque tudo vinha numa resposta só.
+	// 📦 O ESQUELETO, NÃO O RECHEIO.
+	//
+	// Antes esta rota devolvia o texto completo de cada página. Medido com
+	// páginas de tamanho realista: um caderno no limite de 500 páginas passava
+	// de 1,9 MB numa resposta só — inviável no celular do aluno com internet
+	// ruim, e caro na memória do servidor com muita gente abrindo ao mesmo tempo.
+	//
+	// Agora vem a estrutura (guias, títulos, ordem) sem o campo `content`. O app
+	// mostra o índice na hora e busca o conteúdo da página que o aluno abrir,
+	// em GET /v1/app/guides/:guide_id/pages.
+	semConteudo := func(db *gorm.DB) *gorm.DB {
+		return db.Select("id", "notebook_id", "guide_id", "title", "\"order\"",
+			"tags", "created_by_id", "updated_by_id", "created_at", "updated_at").
+			Order("\"order\" asc").Limit(500)
+	}
+
 	if err := database.DB.
-		Preload("Pages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("\"order\" asc").Limit(500) // Já traz ordenado bonitinho!
-		}).
+		Preload("Pages", semConteudo).
 		Preload("Guides", func(db *gorm.DB) *gorm.DB {
 			return db.Order("\"order\" asc").Limit(200)
 		}).
-		Preload("Guides.Pages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("\"order\" asc").Limit(500)
-		}).
-		Preload("Guides.SubGuides.Pages"). // Se tiver sub-pastas
+		Preload("Guides.Pages", semConteudo).
+		Preload("Guides.SubGuides.Pages", semConteudo).
 		Where("id = ?", notebookID).
 		First(&notebook).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Caderno não encontrado"})
@@ -363,5 +373,9 @@ func GetNotebookFull(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"notebook": notebook})
+	c.JSON(http.StatusOK, gin.H{
+		"notebook": notebook,
+		// Aviso ao front: as páginas vêm sem `content` de propósito.
+		"conteudo_das_paginas": "GET /v1/app/guides/{guide_id}/pages",
+	})
 }

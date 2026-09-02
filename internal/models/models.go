@@ -150,7 +150,7 @@ type Notebook struct {
 	OwnerName   string `gorm:"-" json:"owner_name"`
 	UpdaterName string `gorm:"-" json:"updater_name"`
 
-	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;index" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -179,7 +179,7 @@ type Guide struct {
 	Pages     []Page  `gorm:"foreignKey:GuideID;constraint:OnDelete:CASCADE" json:"pages"`
 	SubGuides []Guide `gorm:"foreignKey:ParentGuideID;constraint:OnDelete:CASCADE" json:"sub_guides"`
 
-	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;index" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -203,7 +203,7 @@ type Page struct {
 	OwnerName   string `gorm:"-" json:"owner_name"`
 	UpdaterName string `gorm:"-" json:"updater_name"`
 
-	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;index" json:"created_by_id"`
 	UpdatedByID uuid.UUID `gorm:"type:uuid" json:"updated_by_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -405,7 +405,7 @@ type Notification struct {
 	StartAt time.Time  `gorm:"default:now()" json:"start_at"`
 	EndAt   *time.Time `json:"end_at"`
 
-	CreatedByID uuid.UUID `gorm:"type:uuid" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;index" json:"created_by_id"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -467,8 +467,8 @@ type StudfyQuestion struct {
 // ==========================================================
 type SpaceQuestion struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
-	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"` // De qual turma é
-	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`  // Qual colaborador criou/clonou
+	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`      // De qual turma é
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null;index" json:"created_by_id"` // Qual colaborador criou/clonou
 
 	GroupID string `gorm:"size:50" json:"group_id"` // 👈 MÁGICA DOS EDITAIS: Agrupa as questões em pastas!
 
@@ -745,7 +745,7 @@ type ArenaMatch struct {
 type Flashcard struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
-	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"`
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null;index" json:"created_by_id"`
 
 	GroupID string `gorm:"size:50" json:"group_id"` // 👈 ADICIONE ISSO: A pasta do Edital!
 
@@ -772,7 +772,7 @@ type Flashcard struct {
 type QuestionGroup struct {
 	ID          uuid.UUID `gorm:"type:uuid;default:gen_random_uuid();primaryKey" json:"id"`
 	SpaceID     uuid.UUID `gorm:"type:uuid;index;not null" json:"space_id"`
-	CreatedByID uuid.UUID `gorm:"type:uuid;not null" json:"created_by_id"` // 👈 Novo: Quem criou a pasta
+	CreatedByID uuid.UUID `gorm:"type:uuid;not null;index" json:"created_by_id"` // 👈 Novo: Quem criou a pasta
 
 	Name        string    `gorm:"size:255;not null" json:"name"`
 	Description string    `gorm:"type:text" json:"description"`
