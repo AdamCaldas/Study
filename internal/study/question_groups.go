@@ -72,7 +72,7 @@ func ListQuestionGroups(c *gin.Context) {
 	}
 
 	var groups []models.QuestionGroup
-	database.DB.Preload("Creator").Where("space_id = ?", parsedSpaceID).Order("created_at asc").Find(&groups)
+	database.DB.Preload("Creator").Where("space_id = ?", parsedSpaceID).Order("created_at asc").Limit(500).Find(&groups)
 
 	c.JSON(http.StatusOK, gin.H{"groups": groups})
 }

@@ -64,7 +64,7 @@ func UpdateUserXP(c *gin.Context) {
 // ==========================================================
 func ListGamificationRules(c *gin.Context) {
 	var rules []models.GamificationRule
-	if err := database.DB.Order("reward_xp desc").Find(&rules).Error; err != nil {
+	if err := database.DB.Order("reward_xp desc").Limit(300).Find(&rules).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar regras."})
 		return
 	}

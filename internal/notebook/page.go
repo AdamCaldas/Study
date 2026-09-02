@@ -110,7 +110,7 @@ func ListPagesByGuide(c *gin.Context) {
 	var pages []models.Page
 
 	// Puxa as páginas dessa guia específica, em ordem
-	database.DB.Where("guide_id = ?", parsedGuideID).Order("\"order\" asc").Find(&pages)
+	database.DB.Where("guide_id = ?", parsedGuideID).Order("\"order\" asc").Limit(500).Find(&pages)
 	c.JSON(http.StatusOK, gin.H{"pages": pages})
 }
 

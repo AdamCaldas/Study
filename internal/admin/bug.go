@@ -54,7 +54,7 @@ func ReportBug(c *gin.Context) {
 func ListBugs(c *gin.Context) {
 	var bugs []models.BugReport
 
-	if err := database.DB.Preload("Reporter").Order("created_at desc").Find(&bugs).Error; err != nil {
+	if err := database.DB.Preload("Reporter").Order("created_at desc").Limit(200).Find(&bugs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao buscar a lista de bugs."})
 		return
 	}

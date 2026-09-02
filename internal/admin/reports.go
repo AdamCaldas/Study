@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -23,7 +24,8 @@ func GetUsersByPlan(c *gin.Context) {
 		Select("subscription_type as label, count(*) as count").
 		Group("subscription_type").
 		Scan(&results).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar relatório de planos", "detalhe": err.Error()})
+		log.Printf("relatório de planos: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar relatório de planos"})
 		return
 	}
 
@@ -36,7 +38,8 @@ func GetTopUsersXP(c *gin.Context) {
 
 	// Pega os 10 usuários com maior XP no sistema, escondendo a senha
 	if err := database.DB.Order("xp desc").Limit(10).Omit("Password").Find(&users).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar ranking de XP", "detalhe": err.Error()})
+		log.Printf("ranking de XP: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar ranking de XP"})
 		return
 	}
 
@@ -52,7 +55,8 @@ func GetMoodStats(c *gin.Context) {
 		Select("mood as label, count(*) as count").
 		Group("mood").
 		Scan(&results).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar estatísticas de humor", "detalhe": err.Error()})
+		log.Printf("estatísticas de humor: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao gerar estatísticas de humor"})
 		return
 	}
 

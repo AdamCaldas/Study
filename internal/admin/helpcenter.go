@@ -18,9 +18,10 @@ func GetHelpCenter(c *gin.Context) {
 	var categories []models.HelpCategory
 
 	// O Preload puxa os artigos dentro da categoria e já traz tudo ordenado bonitinho pro Front-end
+	// Teto nos dois níveis: sem isso a tela carrega a base inteira de artigos.
 	if err := database.DB.Preload("Articles", func(db *gorm.DB) *gorm.DB {
-		return db.Order("help_articles.order ASC")
-	}).Order("help_categories.order ASC").Find(&categories).Error; err != nil {
+		return db.Order("help_articles.order ASC").Limit(200)
+	}).Order("help_categories.order ASC").Limit(100).Find(&categories).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao carregar a Central de Ajuda"})
 		return
 	}

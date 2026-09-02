@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func CreateSpace(c *gin.Context) {
 
 	var input CreateSpaceInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos. Confira o nome da turma."})
 		return
 	}
 
@@ -123,7 +124,8 @@ func ListSpaces(c *gin.Context) {
 	subQuery := database.DB.Model(&models.SpacePermission{}).Select("space_id").Where("user_id = ?", userID)
 
 	if err := database.DB.Where("owner_id = ?", userID).Or("id IN (?)", subQuery).Find(&spaces).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao buscar Spaces", "detalhe": err.Error()})
+		log.Printf("listar turmas: %v", err)
+		c.JSON(500, gin.H{"error": "Erro ao buscar Spaces"})
 		return
 	}
 
@@ -148,7 +150,7 @@ func UpdateSpace(c *gin.Context) {
 	var input UpdateSpaceInput
 
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Dados inválidos", "detalhe": err.Error()})
+		c.JSON(400, gin.H{"error": "Dados inválidos."})
 		return
 	}
 
@@ -182,7 +184,8 @@ func UpdateSpace(c *gin.Context) {
 	}
 
 	if err := database.DB.Model(&models.Space{}).Where("id = ?", spaceID).Updates(updates).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao atualizar Space", "detalhe": err.Error()})
+		log.Printf("atualizar turma: %v", err)
+		c.JSON(500, gin.H{"error": "Erro ao atualizar Space"})
 		return
 	}
 
@@ -243,7 +246,7 @@ func JoinSpaceByCode(c *gin.Context) {
 
 	var input JoinSpaceInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(400, gin.H{"error": "Código não fornecido", "detalhe": err.Error()})
+		c.JSON(400, gin.H{"error": "Informe o código da turma."})
 		return
 	}
 
@@ -272,7 +275,8 @@ func JoinSpaceByCode(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&newPermission).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Erro ao entrar no Space", "detalhe": err.Error()})
+		log.Printf("entrar na turma: %v", err)
+		c.JSON(500, gin.H{"error": "Erro ao entrar no Space"})
 		return
 	}
 
@@ -581,8 +585,14 @@ func GenerateAttendanceQR(c *gin.Context) {
 	// 4. Define que o QR Code só vale por 15 minutos
 	expires := time.Now().Add(15 * time.Minute)
 
+	parsedSpaceID, err := uuid.Parse(spaceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
 	session := models.AttendanceSession{
-		SpaceID:   uuid.MustParse(spaceID),
+		SpaceID:   parsedSpaceID,
 		TeacherID: teacherID,
 		QRCode:    qrToken,
 		ExpiresAt: expires,

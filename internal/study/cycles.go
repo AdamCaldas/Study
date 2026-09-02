@@ -381,7 +381,12 @@ func AdvanceCycleStep(c *gin.Context) {
 		return
 	}
 
-	spaceID := uuid.MustParse(spaceIDStr)
+	spaceID, err := uuid.Parse(spaceIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
 	tx := database.DB.Begin()
 
 	var strategy models.StudyStrategy

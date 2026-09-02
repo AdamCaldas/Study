@@ -161,7 +161,7 @@ func GetActiveMissions(c *gin.Context) {
 	// 1. Busca todas as missões ativas (1ª Query)
 	var missions []models.FlashMission
 	now := time.Now()
-	database.DB.Where("space_id = ? AND expires_at > ?", spaceID, now).Find(&missions)
+	database.DB.Where("space_id = ? AND expires_at > ?", spaceID, now).Order("expires_at asc").Limit(100).Find(&missions)
 
 	type MissionResponse struct {
 		models.FlashMission

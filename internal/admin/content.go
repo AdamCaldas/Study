@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -50,7 +51,8 @@ func TransferSpaceOwnership(c *gin.Context) {
 
 	// Atualiza o OwnerID do Space ignorando qualquer checagem de permissão normal
 	if err := database.DB.Model(&models.Space{}).Where("id = ?", spaceID).Update("owner_id", input.NewOwnerID).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao transferir a posse do Space", "detalhe": err.Error()})
+		log.Printf("transferir turma: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao transferir a posse do Space"})
 		return
 	}
 
@@ -64,7 +66,8 @@ func RemoveUserFromSpace(c *gin.Context) {
 
 	// Deleta a permissão da tabela SpacePermission
 	if err := database.DB.Where("space_id = ? AND user_id = ?", spaceID, targetUserID).Delete(&models.SpacePermission{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao expulsar o usuário", "detalhe": err.Error()})
+		log.Printf("remover da turma: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao expulsar o usuário"})
 		return
 	}
 
@@ -77,7 +80,8 @@ func DeleteAnySpace(c *gin.Context) {
 
 	// Como sua tabela tem OnDelete:CASCADE, apagar o Space apaga os Cadernos dele junto!
 	if err := database.DB.Where("id = ?", spaceID).Delete(&models.Space{}).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deletar o Space", "detalhe": err.Error()})
+		log.Printf("apagar turma: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao deletar o Space"})
 		return
 	}
 

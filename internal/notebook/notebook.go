@@ -296,6 +296,8 @@ func ListSpaceNotebooks(c *gin.Context) {
 		Joins("LEFT JOIN users criador ON notebooks.created_by_id = criador.id").
 		Joins("LEFT JOIN users editor ON notebooks.updated_by_id = editor.id").
 		Where("notebooks.space_id = ?", spaceID).
+		Order("notebooks.created_at desc").
+		Limit(300).
 		Find(&notebooks)
 
 	now := time.Now()
@@ -327,12 +329,17 @@ func GetNotebookFull(c *gin.Context) {
 
 	var notebook models.Notebook
 	// Aqui sim a gente usa o Preload para trazer as Pastas (Guides) e as Páginas!
+	// Teto em cada nível: um caderno com milhares de páginas travava o app do
+	// aluno e a memória do servidor, porque tudo vinha numa resposta só.
 	if err := database.DB.
 		Preload("Pages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("\"order\" asc") // Já traz ordenado bonitinho!
+			return db.Order("\"order\" asc").Limit(500) // Já traz ordenado bonitinho!
+		}).
+		Preload("Guides", func(db *gorm.DB) *gorm.DB {
+			return db.Order("\"order\" asc").Limit(200)
 		}).
 		Preload("Guides.Pages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("\"order\" asc")
+			return db.Order("\"order\" asc").Limit(500)
 		}).
 		Preload("Guides.SubGuides.Pages"). // Se tiver sub-pastas
 		Where("id = ?", notebookID).

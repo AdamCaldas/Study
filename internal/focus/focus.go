@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"log"
 	"net/http"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
@@ -27,7 +28,7 @@ func RegisterPomodoro(c *gin.Context) {
 
 	var input PomodoroInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Duração inválida", "detalhe": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Informe a duração em minutos."})
 		return
 	}
 
@@ -37,7 +38,8 @@ func RegisterPomodoro(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&session).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar a sessão do Pomodoro", "detalhe": err.Error()})
+		log.Printf("salvar pomodoro: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar a sessão do Pomodoro"})
 		return
 	}
 
@@ -54,7 +56,7 @@ func RegisterMood(c *gin.Context) {
 
 	var input MoodInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Humor inválido", "detalhe": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Informe como você está se sentindo."})
 		return
 	}
 
@@ -64,7 +66,8 @@ func RegisterMood(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&mood).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar humor", "detalhe": err.Error()})
+		log.Printf("salvar humor: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao salvar humor"})
 		return
 	}
 

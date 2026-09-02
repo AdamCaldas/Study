@@ -17,25 +17,30 @@ type FilterInput struct {
 // 📂 CATEGORIAS: Criar, Listar e Apagar
 // ==========================================================
 func CreateCategory(c *gin.Context) {
-	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(c.Param("space_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
 	var input FilterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Nome da categoria é obrigatório."})
 		return
 	}
 
-	newCat := models.FlashcardCategory{
-		SpaceID: uuid.MustParse(spaceIDStr),
-		Name:    input.Name,
+	newCat := models.FlashcardCategory{SpaceID: parsedSpaceID, Name: input.Name}
+	if err := database.DB.Create(&newCat).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar categoria."})
+		return
 	}
-	database.DB.Create(&newCat)
 	c.JSON(http.StatusCreated, gin.H{"message": "Categoria criada!", "category": newCat})
 }
 
 func ListCategories(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	var categories []models.FlashcardCategory
-	database.DB.Where("space_id = ?", spaceIDStr).Find(&categories)
+	database.DB.Where("space_id = ?", spaceIDStr).Order("name asc").Limit(500).Find(&categories)
 	c.JSON(http.StatusOK, gin.H{"categories": categories})
 }
 
@@ -49,25 +54,30 @@ func DeleteCategory(c *gin.Context) {
 // 🏷️ TAGS: Criar, Listar e Apagar
 // ==========================================================
 func CreateTag(c *gin.Context) {
-	spaceIDStr := c.Param("space_id")
+	parsedSpaceID, err := uuid.Parse(c.Param("space_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID do Space inválido."})
+		return
+	}
+
 	var input FilterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Nome da tag é obrigatório."})
 		return
 	}
 
-	newTag := models.FlashcardTag{
-		SpaceID: uuid.MustParse(spaceIDStr),
-		Name:    input.Name,
+	newTag := models.FlashcardTag{SpaceID: parsedSpaceID, Name: input.Name}
+	if err := database.DB.Create(&newTag).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar tag."})
+		return
 	}
-	database.DB.Create(&newTag)
 	c.JSON(http.StatusCreated, gin.H{"message": "Tag criada!", "tag": newTag})
 }
 
 func ListTags(c *gin.Context) {
 	spaceIDStr := c.Param("space_id")
 	var tags []models.FlashcardTag
-	database.DB.Where("space_id = ?", spaceIDStr).Find(&tags)
+	database.DB.Where("space_id = ?", spaceIDStr).Order("name asc").Limit(500).Find(&tags)
 	c.JSON(http.StatusOK, gin.H{"tags": tags})
 }
 

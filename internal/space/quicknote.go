@@ -2,6 +2,8 @@ package space
 
 import (
 	"net/http"
+
+	"studfy-backend/internal/activity"
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/database"
 	"studfy-backend/pkg/utils"
@@ -31,10 +33,13 @@ func CreateQuickNote(c *gin.Context) {
 		return
 	}
 
-	// 1. Verifica se o utilizador tem acesso a esse Space (Garantindo que compara UUID com UUID)
+	// A permissão já foi conferida na rota (CheckSpaceAccess +
+	// RequireSpaceCreateContent): quem chega aqui é membro da turma E pode
+	// criar conteúdo. Antes o handler exigia ser DONO, então o colaborador
+	// autorizado pelo professor levava 403 sem motivo aparente.
 	var space models.Space
-	if err := database.DB.Where("id = ? AND owner_id = ?", parsedSpaceID, userID).First(&space).Error; err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Space não encontrado ou acesso negado"})
+	if err := database.DB.Select("id").Where("id = ?", parsedSpaceID).First(&space).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Space não encontrado"})
 		return
 	}
 
@@ -61,6 +66,8 @@ func CreateQuickNote(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar nota"})
 		return
 	}
+
+	activity.Log(parsedSpaceID, userID, "criou uma nota rápida")
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Nota criada!", "note": newNote})
 }
@@ -95,7 +102,7 @@ func ListSpaceNotes(c *gin.Context) {
 
 	// 3. BUSCA AS NOTAS (Se passou da segurança, liberta a leitura)
 	var notes []models.QuickNote
-	if err := database.DB.Where("space_id = ?", parsedSpaceID).Find(&notes).Error; err != nil {
+	if err := database.DB.Where("space_id = ?", parsedSpaceID).Order("created_at desc").Limit(300).Find(&notes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao carregar as notas"})
 		return
 	}
@@ -124,11 +131,15 @@ func UpdateQuickNote(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Model(&models.QuickNote{}).Where("id = ?", parsedNoteID).Updates(models.QuickNote{
-		Title:   input.Title,
-		Content: input.Content,
-		Color:   input.Color,
-	}).Error; err != nil {
+	// 🛡️ A nota tem que ser desta turma: sem isto, um note_id de outra turma
+	// seria aceito (a rota só confere que você é membro DESTA).
+	if err := database.DB.Model(&models.QuickNote{}).
+		Where("id = ? AND space_id = ?", parsedNoteID, c.Param("space_id")).
+		Updates(models.QuickNote{
+			Title:   input.Title,
+			Content: input.Content,
+			Color:   input.Color,
+		}).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao atualizar a nota"})
 		return
 	}
@@ -144,8 +155,14 @@ func DeleteQuickNote(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Where("id = ?", parsedNoteID).Delete(&models.QuickNote{}).Error; err != nil {
+	// 🛡️ Só apaga se a nota for desta turma.
+	res := database.DB.Where("id = ? AND space_id = ?", parsedNoteID, c.Param("space_id")).Delete(&models.QuickNote{})
+	if res.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao apagar a nota"})
+		return
+	}
+	if res.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Nota não encontrada nesta turma"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Nota apagada!"})

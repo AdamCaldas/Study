@@ -85,6 +85,8 @@ func ListSpaceRequests(c *gin.Context) {
 		Select("space_join_requests.id as request_id, users.id as user_id, users.full_name, space_join_requests.status").
 		Joins("left join users on users.id = space_join_requests.user_id").
 		Where("space_join_requests.space_id = ? AND space_join_requests.status = 'pending'", spaceID).
+		Order("space_join_requests.created_at asc").
+		Limit(200).
 		Scan(&requests).Error
 
 	if err != nil || len(requests) == 0 {

@@ -40,7 +40,7 @@ func CreateGuide(c *gin.Context) {
 
 	var req GuideInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos", "details": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Dados inválidos. O nome da guia é obrigatório."})
 		return
 	}
 
