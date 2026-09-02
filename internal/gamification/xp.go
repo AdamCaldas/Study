@@ -64,8 +64,9 @@ func RewardXP(c *gin.Context) {
 	// usuário já ganhou XP por essa ação hoje (registrado no ActivityLog).
 	logAction := "XP:" + input.Action
 	if rule.DailyLimit > 0 {
-		now := time.Now()
-		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		// O limite é "por dia" do ponto de vista do aluno: em UTC o contador
+		// zerava às 21h no Brasil, dando XP extra todo fim de tarde.
+		startOfDay := utils.Hoje()
 		var todayCount int64
 		database.DB.Model(&models.ActivityLog{}).
 			Where("user_id = ? AND action = ? AND created_at >= ?", userID, logAction, startOfDay).

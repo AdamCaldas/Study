@@ -269,8 +269,9 @@ func ListCycles(c *gin.Context) {
 		}
 	}
 
+	// "Hoje" é o dia do aluno: em UTC o estudo da noite caía no dia seguinte.
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := utils.InicioDoDia(now)
 
 	if strategy.UpdatedAt.Before(today) {
 		strategy.CurrentStep = 0
@@ -411,8 +412,9 @@ func AdvanceCycleStep(c *gin.Context) {
 		return
 	}
 
+	// "Hoje" é o dia do aluno: em UTC o estudo da noite caía no dia seguinte.
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := utils.InicioDoDia(now)
 
 	if strategy.UpdatedAt.Before(today) {
 		strategy.CurrentStep = 0

@@ -47,6 +47,9 @@ services:
         value: "8080"
       - key: GIN_MODE
         value: release
+      # Fuso do público: sem isto o estudo da noite conta no dia seguinte.
+      - key: TZ_APP
+        value: America/Sao_Paulo
 
       # --- Banco ---
       - key: DATABASE_URL

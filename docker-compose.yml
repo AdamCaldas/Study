@@ -69,6 +69,8 @@ services:
       # Cria/atualiza as tabelas no primeiro boot (banco novo começa vazio)
       AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
       GIN_MODE: ${GIN_MODE:-release}
+      # Fuso do público: sem isto o estudo da noite conta no dia seguinte.
+      TZ_APP: ${TZ_APP:-America/Sao_Paulo}
       PORT: "8080"
       JWT_SECRET: ${JWT_SECRET}
       # 🔑 Keycloak — de onde a API baixa as chaves públicas (JWKS).

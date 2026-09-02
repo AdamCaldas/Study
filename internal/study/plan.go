@@ -544,8 +544,9 @@ func ListPlans(c *gin.Context) {
 	// ==========================================================
 	// 📊 LÓGICA DE ANALYTICS (HOJE)
 	// ==========================================================
+	// "Hoje" é o dia do aluno: em UTC o estudo da noite caía no dia seguinte.
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := utils.InicioDoDia(now)
 	intToday := int(now.Weekday())
 
 	var todayLog models.ScheduleLog
@@ -812,8 +813,9 @@ func ExecutePlanBlock(c *gin.Context) {
 		return
 	}
 
+	// "Hoje" é o dia do aluno: em UTC o estudo da noite caía no dia seguinte.
 	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	today := utils.InicioDoDia(now)
 
 	var scheduleLog models.ScheduleLog
 	if err := tx.Where("user_id = ? AND space_id = ? AND schedule_id = ? AND date = ?", userID, spaceID, strategy.ID, today).First(&scheduleLog).Error; err != nil {
@@ -1033,8 +1035,9 @@ func GetMyStudyAnalytics(c *gin.Context) {
 	var todayMinutes, weekMinutes, extraMinutes int
 	subjectTotals := make(map[string]int)
 
-	now := time.Now()
-	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// Recortes de "hoje" e "esta semana" no fuso do aluno.
+	now := utils.Agora()
+	startOfDay := utils.InicioDoDia(now)
 	startOfWeek := startOfDay.AddDate(0, 0, -int(now.Weekday()))
 
 	for _, s := range sessions {

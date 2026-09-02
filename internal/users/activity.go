@@ -7,6 +7,7 @@ import (
 	"studfy-backend/internal/models"
 	"studfy-backend/pkg/cache"
 	"studfy-backend/pkg/database"
+	"studfy-backend/pkg/utils"
 
 	"github.com/google/uuid"
 )
@@ -47,9 +48,11 @@ func TouchDailyActivity(userID uuid.UUID) {
 	}
 	user := found[0]
 
+	// O dia é o do ALUNO, não o do servidor. Em UTC, quem estuda às 22h no
+	// Brasil já está no dia seguinte — e perdia a ofensiva sem motivo.
 	now := time.Now()
-	today := truncateDay(now)
-	last := truncateDay(user.LastLoginAt)
+	today := utils.InicioDoDia(now)
+	last := utils.InicioDoDia(user.LastLoginAt)
 
 	// Já contabilizamos a presença de hoje: nada a fazer.
 	if !user.LastLoginAt.IsZero() && last.Equal(today) {
@@ -84,8 +87,4 @@ func TouchDailyActivity(userID uuid.UUID) {
 
 	// O painel mostra a ofensiva: limpa o cache para o aluno ver o número novo.
 	cache.AppCache.Delete("dashboard_" + userID.String())
-}
-
-func truncateDay(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
