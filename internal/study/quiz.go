@@ -2,6 +2,7 @@ package study
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"time"
 
@@ -347,6 +348,66 @@ func ReportCheatAttempt(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Infração registrada silenciosamente."})
 }
 
+// notaMinimaCertificado é o corte para emitir o certificado, na escala 0..10.
+const notaMinimaCertificado = 6.0
+
+// mediaDoAluno devolve a média das provas concluídas na escala 0..10.
+//
+// Cada prova é convertida em aproveitamento — pontos obtidos ÷ pontos
+// possíveis — para que provas de tamanhos diferentes pesem igual. Sem isso, o
+// corte comparava pontos brutos e o resultado dependia de quantas questões a
+// prova tinha, não de quanto o aluno acertou.
+func mediaDoAluno(spaceID, userID uuid.UUID) (float64, error) {
+	var linhas []struct {
+		Score       float64
+		TotalPoints float64
+	}
+
+	err := database.DB.Raw(`
+		SELECT qr.score AS score,
+		       COALESCE(pts.total_points, 0) AS total_points
+		FROM quiz_results qr
+		LEFT JOIN (
+			SELECT quiz_id, SUM(points) AS total_points
+			FROM quiz_questions
+			GROUP BY quiz_id
+		) pts ON pts.quiz_id = qr.quiz_id
+		WHERE qr.space_id = ? AND qr.user_id = ? AND qr.status = 'completed'
+	`, spaceID, userID).Scan(&linhas).Error
+	if err != nil {
+		return 0, err
+	}
+	if len(linhas) == 0 {
+		return 0, nil
+	}
+
+	var soma float64
+	var contadas int
+	for _, l := range linhas {
+		if l.TotalPoints <= 0 {
+			continue // prova sem questões pontuadas não entra na média
+		}
+		aproveitamento := l.Score / l.TotalPoints
+		if aproveitamento > 1 {
+			aproveitamento = 1 // pontos extras do professor não passam de 100%
+		}
+		if aproveitamento < 0 {
+			aproveitamento = 0
+		}
+		soma += aproveitamento * 10
+		contadas++
+	}
+	if contadas == 0 {
+		return 0, nil
+	}
+	return soma / float64(contadas), nil
+}
+
+// arredonda deixa a nota com uma casa decimal, para mostrar na tela.
+func arredonda(n float64) float64 {
+	return math.Round(n*10) / 10
+}
+
 // ==========================================================
 // 🎓 EMISSÃO DE CERTIFICADOS
 // ==========================================================
@@ -382,30 +443,41 @@ func ClaimCertificate(c *gin.Context) {
 		return
 	}
 
-	var totalScore float64 = 0
 	pendingExams := false
-
 	for _, res := range results {
 		if res.Status == "pending_review" {
 			pendingExams = true
 		}
-		totalScore += res.Score
 	}
-
 	if pendingExams {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "O Professor ainda está corrigindo algumas de suas provas. Aguarde!"})
 		return
 	}
 
-	average := totalScore / float64(len(results))
+	// 📊 A média precisa ser em NOTA (0 a 10), não em pontos brutos.
+	//
+	// Antes o corte de 6.0 era comparado com a soma de pontos: uma prova de 20
+	// questões valia 20 pontos e passava fácil, enquanto uma prova de 5 questões
+	// NUNCA passava — nem gabaritando, porque 5 < 6. O aluno era reprovado pelo
+	// tamanho da prova, não pelo desempenho.
+	//
+	// Agora cada prova vira aproveitamento (acertos ÷ total possível) e a média
+	// é a média desses aproveitamentos, na escala 0..10.
+	media, err := mediaDoAluno(parsedSpaceID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao calcular a sua média."})
+		return
+	}
 
-	if average < 6.0 {
+	if media < notaMinimaCertificado {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":     "Sua média foi baixa. Estude mais um pouco e refaça os simulados para conseguir o certificado!",
-			"sua_media": average,
+			"error":       "Sua média foi baixa. Estude mais um pouco e refaça os simulados para conseguir o certificado!",
+			"sua_media":   arredonda(media),
+			"nota_minima": notaMinimaCertificado,
 		})
 		return
 	}
+	average := media
 
 	newCert := models.Certificate{
 		SpaceID:      parsedSpaceID,

@@ -113,16 +113,63 @@ func minutesToHHMM(m int) string {
 	return fmt.Sprintf("%02d:%02d", h, mins)
 }
 
+// pesoDaDisciplina traduz importância e desempenho em "quanto tempo merece".
+//
+// Importância alta puxa para cima; desempenho baixo também (quem vai mal
+// precisa de mais tempo). Os dois campos vêm do front na escala 1..5, mas nada
+// impedia mandar 0 — e com importância 0 e desempenho 6 o peso dava ZERO.
+//
+// Se TODAS as disciplinas tivessem peso zero, a soma dava zero e a divisão
+// gerava NaN. Convertido para int, isso virava -9223372036854775808 minutos,
+// que era gravado no banco e mostrado ao aluno. Por isso os valores são
+// travados na escala válida e o peso tem um piso de 1.
+func pesoDaDisciplina(d DisciplineInput) float64 {
+	importancia := limita(d.Importance, 1, 5)
+	desempenho := limita(d.Performance, 1, 5)
+
+	peso := importancia + (6 - desempenho)
+	if peso < 1 {
+		peso = 1 // nunca zero: toda matéria escolhida merece algum tempo
+	}
+	return float64(peso)
+}
+
+// limita prende um número dentro da faixa aceita.
+func limita(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minSess int, maxSess int) []models.StudyBlock {
-	var totalWeight float64 = 0
+	if len(disciplines) == 0 {
+		return nil
+	}
+
+	// Sem horas por dia não há o que distribuir. Um padrão razoável evita
+	// devolver um plano com todos os blocos zerados.
+	if dailyMin <= 0 {
+		dailyMin = 120
+	}
+
+	var totalWeight float64
 	var calculatedBlocks []models.StudyBlock
 	sequence := 1
 
 	weights := make([]float64, len(disciplines))
 	for i, disc := range disciplines {
-		w := float64(disc.Importance + (6 - disc.Performance))
-		weights[i] = w
-		totalWeight += w
+		weights[i] = pesoDaDisciplina(disc)
+		totalWeight += weights[i]
+	}
+
+	// Com o piso de 1 por disciplina isto nunca deveria acontecer; a guarda
+	// fica porque o custo de errar aqui é gravar minutos absurdos no banco.
+	if totalWeight <= 0 {
+		totalWeight = float64(len(disciplines))
 	}
 
 	for i, disc := range disciplines {
@@ -132,19 +179,25 @@ func calculateDistribution(disciplines []DisciplineInput, dailyMin float64, minS
 		if minSess > 0 && suggestedMin < minSess {
 			suggestedMin = minSess
 		}
+		if suggestedMin < 1 {
+			suggestedMin = 1 // bloco de zero minuto não faz sentido na agenda
+		}
 
 		blocksNeeded := 1
 		if maxSess > 0 && suggestedMin > maxSess {
 			blocksNeeded = int(math.Ceil(float64(suggestedMin) / float64(maxSess)))
 			suggestedMin = suggestedMin / blocksNeeded
+			if suggestedMin < 1 {
+				suggestedMin = 1
+			}
 		}
 
 		for b := 0; b < blocksNeeded; b++ {
 			calculatedBlocks = append(calculatedBlocks, models.StudyBlock{
 				NotebookID:       disc.NotebookID,
 				Activity:         disc.Name,
-				Importance:       disc.Importance,
-				Performance:      disc.Performance,
+				Importance:       limita(disc.Importance, 1, 5),
+				Performance:      limita(disc.Performance, 1, 5),
 				SuggestedMinutes: suggestedMin,
 				Sequence:         sequence,
 			})

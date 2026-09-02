@@ -711,14 +711,19 @@ func GetClassThermometer(c *gin.Context) {
 	var results []models.QuizResult
 	database.DB.Where("space_id = ? AND status = 'completed'", spaceID).Find(&results)
 
-	var totalScore float64 = 0
-	var averageScore float64 = 0
-	if len(results) > 0 {
-		for _, r := range results {
-			totalScore += r.Score
-		}
-		averageScore = totalScore / float64(len(results))
-	}
+	// A média da turma em NOTA (0..10), não em pontos brutos: uma prova de 20
+	// questões valia 20 e uma de 5 valia 5, então a "média" dependia do tamanho
+	// da prova e não do desempenho.
+	var averageScore float64
+	database.DB.Raw(`
+		SELECT COALESCE(AVG(LEAST(GREATEST(qr.score / NULLIF(pts.total_points,0), 0), 1) * 10), 0)
+		FROM quiz_results qr
+		JOIN (
+			SELECT quiz_id, SUM(points) AS total_points
+			FROM quiz_questions GROUP BY quiz_id
+		) pts ON pts.quiz_id = qr.quiz_id
+		WHERE qr.space_id = ? AND qr.status = 'completed'
+	`, spaceID).Scan(&averageScore)
 
 	// 3. Métrica B: Alunos em Risco de Evasão (Média abaixo de 6.0)
 	// Usamos SQL Raw (GORM) para agrupar as notas de cada aluno e achar quem está mal
@@ -730,13 +735,20 @@ func GetClassThermometer(c *gin.Context) {
 	}
 
 	var atRisk []StudentRisk
+	// Também em nota 0..10: antes o corte de 6.0 comparava pontos brutos, então
+	// quem fazia provas curtas aparecia como "em risco" mesmo indo bem.
 	database.DB.Raw(`
-		SELECT u.id as user_id, u.full_name, u.email, AVG(qr.score) as average
+		SELECT u.id as user_id, u.full_name, u.email,
+		       AVG(LEAST(GREATEST(qr.score / NULLIF(pts.total_points,0), 0), 1) * 10) as average
 		FROM quiz_results qr
 		JOIN users u ON u.id = qr.user_id
+		JOIN (
+			SELECT quiz_id, SUM(points) AS total_points
+			FROM quiz_questions GROUP BY quiz_id
+		) pts ON pts.quiz_id = qr.quiz_id
 		WHERE qr.space_id = ? AND qr.status = 'completed'
 		GROUP BY u.id, u.full_name, u.email
-		HAVING AVG(qr.score) < 6.0
+		HAVING AVG(LEAST(GREATEST(qr.score / NULLIF(pts.total_points,0), 0), 1) * 10) < 6.0
 		ORDER BY average ASC
 	`, spaceID).Scan(&atRisk)
 
@@ -920,10 +932,15 @@ func ExportClassDiaryCSV(c *gin.Context) {
 			GROUP BY ar.student_id
 		) att ON att.student_id = sp.user_id
 		LEFT JOIN (
-			SELECT user_id, AVG(score) AS average
-			FROM quiz_results
-			WHERE space_id = ? AND status = 'completed'
-			GROUP BY user_id
+			SELECT qr2.user_id,
+			       AVG(LEAST(GREATEST(qr2.score / NULLIF(pts.total_points,0), 0), 1) * 10) AS average
+			FROM quiz_results qr2
+			JOIN (
+				SELECT quiz_id, SUM(points) AS total_points
+				FROM quiz_questions GROUP BY quiz_id
+			) pts ON pts.quiz_id = qr2.quiz_id
+			WHERE qr2.space_id = ? AND qr2.status = 'completed'
+			GROUP BY qr2.user_id
 		) qr ON qr.user_id = sp.user_id
 		WHERE sp.space_id = ?
 		  AND sp.access_level = 'VIEWER'

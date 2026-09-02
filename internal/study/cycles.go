@@ -153,27 +153,42 @@ func GenerateAutoCycle(c *gin.Context) {
 	var finalBlocks []models.StudyBlock
 	dailyMinutes := input.HoursPerDay * 60
 
-	var totalWeight float64 = 0
-	for _, disc := range input.Disciplines {
-		totalWeight += float64(disc.Importance + (6 - disc.Performance))
+	// Mesma regra do cronograma: peso a partir de importância e desempenho,
+	// com piso de 1 para não existir divisão por zero. Antes este trecho
+	// repetia a conta na mão e podia gerar minutos absurdos quando todos os
+	// pesos davam zero.
+	if dailyMinutes <= 0 {
+		dailyMinutes = 120
+	}
+
+	var totalWeight float64
+	pesos := make([]float64, len(input.Disciplines))
+	for i, disc := range input.Disciplines {
+		pesos[i] = pesoDaDisciplina(disc)
+		totalWeight += pesos[i]
+	}
+	if totalWeight <= 0 {
+		totalWeight = float64(len(input.Disciplines))
 	}
 
 	sequence := 1
-	for _, disc := range input.Disciplines {
-		weight := float64(disc.Importance + (6 - disc.Performance))
-		proportion := weight / totalWeight
+	for i, disc := range input.Disciplines {
+		proportion := pesos[i] / totalWeight
 		suggestedMin := int(math.Round(proportion * dailyMinutes))
 
 		if input.MinSessionMin > 0 && suggestedMin < input.MinSessionMin {
 			suggestedMin = input.MinSessionMin
+		}
+		if suggestedMin < 1 {
+			suggestedMin = 1
 		}
 
 		finalBlocks = append(finalBlocks, models.StudyBlock{
 			StrategyID:       strategy.ID,
 			NotebookID:       disc.NotebookID,
 			Activity:         disc.Name,
-			Importance:       disc.Importance,
-			Performance:      disc.Performance,
+			Importance:       limita(disc.Importance, 1, 5),
+			Performance:      limita(disc.Performance, 1, 5),
 			SuggestedMinutes: suggestedMin,
 			Sequence:         sequence,
 			DayOfWeek:        disc.DayOfWeek,
